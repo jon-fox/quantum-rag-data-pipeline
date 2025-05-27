@@ -1,16 +1,13 @@
 import os
-from dotenv import load_dotenv
 import requests
-from datetime import datetime, timedelta
 import pandas as pd
 import logging
-from typing import Optional # Added
 
 # Attempt to import PgVectorStorage
 try:
     from src.storage.pgvector_storage import PgVectorStorage
 except ImportError:
-    PgVectorStorage = None # Allow script to run if PgVectorStorage is not found, but DB operations will fail
+    PgVectorStorage = None 
     logging.getLogger(__name__).warning("PgVectorStorage could not be imported. Database operations will be skipped.")
 
 
