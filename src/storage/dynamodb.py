@@ -18,9 +18,9 @@ class DynamoDBStorage:
     
     def __init__(
         self,
-        table_name: str = None,
-        region: str = None,
-        endpoint_url: str = None
+        table_name: str = "energy_consumption_data",
+        region: str = "us-east-1",
+        endpoint_url: Optional[str] = None
     ):
         """
         Initialize DynamoDB storage handler
@@ -51,7 +51,7 @@ class DynamoDBStorage:
             logger.error(f"Failed to initialize DynamoDB: {e}")
             raise
     
-    def store_energy_data(self, item: Dict[str, Any], condition_expression: str = None) -> Dict[str, Any]:
+    def store_energy_data(self, item: Dict[str, Any], condition_expression: Optional[str] = None) -> Dict[str, Any]:
         """
         Store a single energy consumption data point in DynamoDB
         
@@ -140,7 +140,7 @@ class DynamoDBStorage:
             db_item["raw_json"] = json.dumps(item)
             
             # Prepare put_item arguments
-            put_kwargs = {"Item": db_item}
+            put_kwargs: Dict[str, Any] = {"Item": db_item}
             if condition_expression:
                 put_kwargs["ConditionExpression"] = condition_expression
             
@@ -205,10 +205,9 @@ class DynamoDBStorage:
             
         try:
             # Prepare batch write request
-            batch_items = []
             for item in items:
                 # For each item, try to store individually to capture specific errors
-                result = self.store_listing(item)
+                result = self.store_energy_data(item) # Changed from store_listing to store_energy_data
                 if result["success"]:
                     results["succeeded"] += 1
                 else:
@@ -233,7 +232,7 @@ class DynamoDBStorage:
         db_item: Dict[str, Any], 
         source_item: Dict[str, Any],
         source_key: str, 
-        target_key: str = None
+        target_key: Optional[str] = None
     ) -> None:
         """Helper to add an optional field if it exists in source"""
         if not target_key:
@@ -257,18 +256,18 @@ def store_listing(item: dict) -> Dict[str, Any]:
     Maintained for backward compatibility
     """
     try:
-        result = default_storage.store_listing(item)
+        result = default_storage.store_energy_data(item) # Changed from store_listing to store_energy_data
         if result["success"]:
-            print(f"Stored: {item['itemId']}")
+            print(f"Stored: {item['dataId']}") # Changed from itemId to dataId
         else:
-            print(f"Failed to store {item.get('itemId', 'unknown')}: {result.get('error', 'Unknown error')}")
+            print(f"Failed to store {item.get('dataId', 'unknown')}: {result.get('error', 'Unknown error')}") # Changed from itemId to dataId
         return result
     except Exception as e:
-        print(f"Failed to store {item.get('itemId', 'unknown')}: {e}")
+        print(f"Failed to store {item.get('dataId', 'unknown')}: {e}") # Changed from itemId to dataId
         return {"success": False, "error": str(e)}
 
 def batch_store_listings(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Store multiple listings using the default storage instance
     """
-    return default_storage.batch_store_listings(items)
+    return default_storage.batch_store_energy_data(items) # Changed from batch_store_listings to batch_store_energy_data
