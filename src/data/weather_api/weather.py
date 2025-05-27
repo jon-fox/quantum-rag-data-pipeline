@@ -4,6 +4,15 @@ import requests
 from datetime import datetime, timedelta
 import pandas as pd
 import logging
+from typing import Optional # Added
+
+# Attempt to import PgVectorStorage
+try:
+    from src.storage.pgvector_storage import PgVectorStorage
+except ImportError:
+    PgVectorStorage = None # Allow script to run if PgVectorStorage is not found, but DB operations will fail
+    logging.getLogger(__name__).warning("PgVectorStorage could not be imported. Database operations will be skipped.")
+
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -28,7 +37,7 @@ class WeatherAPIClient:
         self.api_key = api_key
         self.base_url = base_url
 
-    def get_historical_weather(self, date_str: str, locations: dict) -> pd.DataFrame:
+    def get_historical_weather(self, date_str: str, locations: dict, store_in_db: bool = False) -> pd.DataFrame:
         """
         Fetches historical weather data for a given date and multiple locations.
 
@@ -36,6 +45,8 @@ class WeatherAPIClient:
             date_str (str): The date for which to fetch data (YYYY-MM-DD).
             locations (dict): A dictionary where keys are location names (e.g., "Downtown")
                               and values are city identifiers for the API (e.g., "Houston").
+            store_in_db (bool, optional): If True, attempts to store the fetched data
+                                          into the 'historical_weather_data' table. Defaults to False.
 
         Returns:
             pd.DataFrame: A DataFrame containing the time, temperature for each location,
@@ -110,4 +121,48 @@ class WeatherAPIClient:
         # Ensure all final columns exist before selecting
         final_columns_existing = [col for col in final_columns if col in weather_df.columns]
         
-        return weather_df[final_columns_existing]
+        result_df = weather_df[final_columns_existing].copy()
+
+        if store_in_db and not result_df.empty and PgVectorStorage is not None:
+            pg_storage_instance = None
+            try:
+                df_for_db = result_df.copy()
+                if 'time' in df_for_db.columns:
+                    df_for_db.rename(columns={'time': 'timestamp'}, inplace=True)
+                else:
+                    logger.warning("'time' column not found in DataFrame intended for DB. 'timestamp' column will be missing.")
+
+                # Ensure APP_ENVIRONMENT is available, e.g., from .env file loaded by load_dotenv()
+                app_env = os.getenv("APP_ENVIRONMENT", "dev")
+                pg_storage_instance = PgVectorStorage(app_environment=app_env)
+                
+                # Define the expected DB columns based on create_weather_table.py
+                db_schema_columns = ['timestamp', 'houston_temp_c', 'austin_temp_c', 'dallas_temp_c', 'avg_temperature_c', 'avg_temperature_f']
+                # Filter DataFrame to only include columns that exist in the DB schema
+                columns_to_store_in_db = [col for col in db_schema_columns if col in df_for_db.columns]
+                df_to_actually_store = df_for_db[columns_to_store_in_db]
+
+                if not df_to_actually_store.empty:
+                    logger.info(f"Attempting to store {len(df_to_actually_store)} weather records into 'historical_weather_data' table.")
+                    pg_storage_instance.insert_dataframe_to_table(
+                        df_to_actually_store,
+                        'historical_weather_data',
+                        on_conflict_do_update=True 
+                    )
+                    logger.info("Successfully stored weather data in 'historical_weather_data' table.")
+                else:
+                    logger.info("DataFrame for DB storage is empty after filtering for schema columns. Skipping database storage.")
+
+            except AttributeError as ae:
+                if "insert_dataframe_to_table" in str(ae):
+                    logger.error("PgVectorStorage does not have 'insert_dataframe_to_table' method. Please add it to the class.")
+                else:
+                    logger.error(f"Attribute error during database operation: {ae}", exc_info=True)
+            except Exception as db_err:
+                logger.error(f"Failed to store weather data in database: {db_err}", exc_info=True)
+            finally:
+                if pg_storage_instance and hasattr(pg_storage_instance, 'close_db_connection'):
+                    pg_storage_instance.close_db_connection()
+                    logger.info("PostgreSQL connection closed.")
+        
+        return result_df
