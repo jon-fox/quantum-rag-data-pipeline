@@ -133,7 +133,7 @@ class WeatherAPIClient:
                     logger.warning("'time' column not found in DataFrame intended for DB. 'timestamp' column will be missing.")
 
                 # Ensure APP_ENVIRONMENT is available, e.g., from .env file loaded by load_dotenv()
-                app_env = os.getenv("APP_ENVIRONMENT", "dev")
+                app_env = os.getenv("APP_ENVIRONMENT", "prod")
                 pg_storage_instance = PgVectorStorage(app_environment=app_env)
                 
                 # Define the expected DB columns based on create_weather_table.py
