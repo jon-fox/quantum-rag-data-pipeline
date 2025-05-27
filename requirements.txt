@@ -2,3 +2,4 @@ psycopg2-binary
 numpy
 boto3
 python-dotenv
+pandas
