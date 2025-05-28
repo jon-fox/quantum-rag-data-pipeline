@@ -12,15 +12,14 @@ from .data.ercot_api.client import ERCOTClient
 from .data.ercot_api.queries import ERCOTQueries
 from .data.weather_api.weather import WeatherAPIClient
 from .storage.pgvector_storage import PgVectorStorage
-from .storage.dual_storage import DualStorage
 from .services.embedding_service import EmbeddingService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-async def fetch_and_store_ercot_data(ercot_queries: ERCOTQueries, dual_storage: DualStorage, embedding_service=None):
-    """Fetches ERCOT data, generates embeddings, and stores it."""
+async def fetch_and_store_ercot_data(ercot_queries: ERCOTQueries, pg_storage: PgVectorStorage, embedding_service=None):
+    """Fetches ERCOT data, generates embeddings, and stores it using PgVectorStorage."""
     logger.info("Starting ERCOT data fetch and store process...")
     try:
         gen_summary = ercot_queries.get_agg_gen_summary()
@@ -44,6 +43,8 @@ async def fetch_and_store_ercot_data(ercot_queries: ERCOTQueries, dual_storage: 
                 logger.warning(f"Embedding service not available for record {document_id}. Using placeholder embedding.")
                 embedding = np.random.rand(1536).astype(np.float32)
             
+            # Metadata is generated but not stored with PgVectorStorage alone after DualStorage removal.
+            # If metadata storage is needed, PgVectorStorage or another mechanism would need to handle it.
             metadata = {
                 "document_id": document_id,
                 "doc_type": "ercot_generation_summary",
@@ -51,11 +52,13 @@ async def fetch_and_store_ercot_data(ercot_queries: ERCOTQueries, dual_storage: 
                 "data_timestamp": record.get('timestamp_field', datetime.now().isoformat()), # Fallback for timestamp
                 "raw_data_snippet": str(record)[:200] 
             }
-            store_result = dual_storage.store_document_and_embedding(metadata, embedding, vector_id=document_id)
-            if store_result["overall_success"]:
-                logger.info(f"Successfully stored ERCOT gen record: {document_id}")
+            logger.debug(f"Generated metadata for {document_id} (currently not stored): {metadata}")
+
+            store_success = pg_storage.store_embedding(vector_id=document_id, embedding=embedding)
+            if store_success:
+                logger.info(f"Successfully stored ERCOT gen embedding: {document_id}")
             else:
-                logger.error(f"Failed to store ERCOT gen record: {document_id}. Error: {store_result}")
+                logger.error(f"Failed to store ERCOT gen embedding: {document_id}")
 
         # TODO: Add similar processing for other ERCOT endpoints (load summary, ancillary services)
         logger.info("ERCOT data fetch and store process completed.")
@@ -113,10 +116,8 @@ async def main_ingestion_pipeline():
     # PgVectorStorage loads DB params from env by default. lazy_init=False ensures schema is checked/created.
     pg_vector_storage = PgVectorStorage(lazy_init=False, app_environment=get_env_var("APP_ENVIRONMENT", "dev"))
     
-    # DualStorage initializes its own PgVectorStorage (if not provided) and DynamoDBStorage.
-    # Ensure DYNAMODB_TABLE env var is set for DynamoDBStorage.
-    # APP_ENVIRONMENT is used for PgVectorStorage if it loads config from SSM.
-    dual_storage = DualStorage(app_environment=get_env_var("APP_ENVIRONMENT", "dev"))
+    # Removed DualStorage instantiation
+    # dual_storage = DualStorage(app_environment=get_env_var("APP_ENVIRONMENT", "dev"))
 
     # Initialize Embedding Service
     openai_api_key = get_env_var("OPENAI_API_KEY")
@@ -133,7 +134,7 @@ async def main_ingestion_pipeline():
     
     logger.info("--- Starting Data Ingestion Tasks ---")
     
-    await fetch_and_store_ercot_data(ercot_queries, dual_storage, embedding_service)
+    await fetch_and_store_ercot_data(ercot_queries, pg_vector_storage, embedding_service)
     logger.info("ERCOT data processing task called.")
 
     if weather_client:
@@ -150,7 +151,7 @@ async def main_ingestion_pipeline():
         logger.info("ERCOT Auth Manager shutdown called.")
     
     pg_vector_storage.close_db_connection()
-    dual_storage.close_connections()
+    # Removed: dual_storage.close_connections()
     logger.info("Database connections closed.")
 
 if __name__ == "__main__":
