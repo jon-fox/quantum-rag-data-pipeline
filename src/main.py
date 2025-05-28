@@ -14,6 +14,12 @@ from .data.weather_api.weather import WeatherAPIClient
 from .storage.pgvector_storage import PgVectorStorage
 from .services.embedding_service import EmbeddingService
 
+LOCATIONS = {
+    "houston_temp_c": "Houston,TX,USA", 
+    "austin_temp_c": "Austin,TX,USA",
+    "dallas_temp_c": "Dallas,TX,USA"
+}
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -70,13 +76,9 @@ async def fetch_and_store_weather_data(weather_client: WeatherAPIClient, pg_stor
     logger.info("Starting weather data fetch and store process...")
     try:
         yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        locations = {
-            "houston_temp_c": "Houston,TX,USA", 
-            "austin_temp_c": "Austin,TX,USA",
-            "dallas_temp_c": "Dallas,TX,USA"
-        }
+
         # DataFrame columns: time, houston_temp_c, austin_temp_c, dallas_temp_c, avg_temperature_c, avg_temperature_f
-        weather_df = weather_client.get_historical_weather(date_str=yesterday, locations=locations)
+        weather_df = weather_client.get_historical_weather(date_str=yesterday, locations=LOCATIONS)
         
         if not weather_df.empty:
             logger.info(f"Fetched {len(weather_df)} weather records for {yesterday}.")
