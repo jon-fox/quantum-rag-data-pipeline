@@ -7,26 +7,23 @@ import json
 import numpy as np
 from typing import Optional, Dict
 
-# Absolute imports from 'src'
-from .config.env_manager import load_environment, get_env_var
-from .data.ercot_api.client import ERCOTClient
-from .data.ercot_api.queries import ERCOTQueries
-from .data.weather_api.weather import WeatherAPIClient
-from .storage.pgvector_storage import PgVectorStorage
-from .services.embedding_service import EmbeddingService # Keep this if still directly used in main
-from .services.sentence_builder import create_semantic_sentence # Corrected import path
 
-LOCATIONS = {
-    "houston_temp_c": "Houston,TX,USA", 
-    "austin_temp_c": "Austin,TX,USA",
-    "dallas_temp_c": "Dallas,TX,USA"
-}
+from src.config.env_manager import load_environment, get_env_var
+from src.data.ercot_api.client import ERCOTClient
+from src.data.ercot_api.queries import ERCOTQueries
+from src.data.weather_api.weather import WeatherAPIClient
+from src.storage.pgvector_storage import PgVectorStorage
+from src.services.embedding_service import EmbeddingService
+
+from src.services.sentence_builder import process_and_embed_daily_summary 
+from src.config.constants import LOCATIONS # Import LOCATIONS from constants.py
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # create_semantic_sentence function is now in src.services.sentence_builder.py
+# process_and_embed_daily_summary is now in src.services.sentence_builder.py
 
 async def fetch_daily_ercot_metric(ercot_queries: ERCOTQueries, date_to_fetch: str) -> Optional[float]:
     """Fetches and processes ERCOT data to get a single daily generation metric."""
@@ -112,64 +109,6 @@ async def fetch_daily_weather_metrics(weather_client: WeatherAPIClient, date_to_
         logger.error(f"Error fetching/processing weather daily metrics for {date_to_fetch}: {e}", exc_info=True)
         return None
 
-async def process_and_embed_daily_summary(
-    date_to_process: str, 
-    ercot_queries: ERCOTQueries, 
-    weather_client: Optional[WeatherAPIClient], 
-    pg_storage: PgVectorStorage, 
-    embedding_service: Optional[EmbeddingService]
-):
-    """Orchestrates fetching, processing, sentence creation, embedding, and storage for a single day."""
-    logger.info(f"Processing daily summary for embedding on {date_to_process}...")
-
-    ercot_metric = await fetch_daily_ercot_metric(ercot_queries, date_to_process)
-    
-    weather_metrics = None
-    if weather_client:
-        weather_metrics = await fetch_daily_weather_metrics(weather_client, date_to_process)
-    else:
-        logger.info(f"Weather client not available, skipping weather metrics for {date_to_process}.")
-
-    if ercot_metric is None:
-        logger.warning(f"Could not retrieve ERCOT metric for {date_to_process}. Skipping embedding.")
-        return
-    
-    # If weather client was available but metrics couldn't be fetched, log it.
-    # create_semantic_sentence is expected to handle None weather_metrics.
-    if weather_client and weather_metrics is None:
-        logger.warning(f"Could not retrieve Weather metrics for {date_to_process} (weather client was available).")
-
-    semantic_sentence = create_semantic_sentence(date_to_process, ercot_metric, weather_metrics)
-
-    if not semantic_sentence:
-        logger.warning(f"Semantic sentence could not be created for {date_to_process}. Skipping embedding.")
-        return
-
-    logger.info(f"Generated semantic sentence for {date_to_process}: \"{semantic_sentence}\"")
-
-    if not embedding_service:
-        logger.warning(f"Embedding service not available. Cannot generate embedding for {date_to_process}.")
-        return
-        
-    try:
-        embedding_list = embedding_service.generate_embedding(semantic_sentence)
-        if embedding_list is None:
-            logger.error(f"Embedding generation failed for {date_to_process}, received None.")
-            return
-        
-        embedding_array = np.array(embedding_list).astype(np.float32)
-        vector_id = f"daily_summary_{date_to_process}" 
-        
-        store_success = pg_storage.store_embedding(vector_id=vector_id, embedding=embedding_array)
-        if store_success:
-            logger.info(f"Successfully stored combined daily embedding for {date_to_process} with ID {vector_id}.")
-        else:
-            logger.error(f"Failed to store combined daily embedding for {date_to_process}.")
-    except Exception as e:
-        logger.error(f"Error generating or storing embedding for {date_to_process}: {e}", exc_info=True)
-
-# Removed fetch_and_store_ercot_data function
-
 async def fetch_and_store_weather_data(weather_client: WeatherAPIClient, pg_storage: PgVectorStorage, date_to_fetch: str):
     """Fetches historical weather data and stores the raw DataFrame."""
     logger.info(f"Fetching and storing raw weather data for {date_to_fetch}...")
@@ -239,12 +178,14 @@ async def main_ingestion_pipeline():
     for i in range(1, days_to_process_for_embeddings + 1):
         date_to_process = (today - timedelta(days=i)).strftime('%Y-%m-%d')
         embedding_tasks.append(
-            process_and_embed_daily_summary(
-                date_to_process, 
-                ercot_queries, 
-                weather_client,
-                pg_vector_storage, 
-                embedding_service
+            process_and_embed_daily_summary( 
+                date_to_process=date_to_process, 
+                ercot_queries=ercot_queries, 
+                weather_client=weather_client,
+                pg_storage=pg_vector_storage, 
+                embedding_service=embedding_service,
+                fetch_ercot_metric_func=fetch_daily_ercot_metric, # Pass local function
+                fetch_weather_metrics_func=fetch_daily_weather_metrics # Pass local function
             )
         )
     if embedding_tasks:

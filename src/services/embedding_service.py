@@ -1,5 +1,3 @@
-\
-import os
 import logging
 from openai import OpenAI
 from typing import List
