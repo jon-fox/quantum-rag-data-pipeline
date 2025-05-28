@@ -114,11 +114,8 @@ async def main_ingestion_pipeline():
         weather_client = WeatherAPIClient(api_key=weather_api_key)
 
     # PgVectorStorage loads DB params from env by default. lazy_init=False ensures schema is checked/created.
-    pg_vector_storage = PgVectorStorage(lazy_init=False, app_environment=get_env_var("APP_ENVIRONMENT", "dev"))
+    pg_vector_storage = PgVectorStorage(lazy_init=False, app_environment=get_env_var("APP_ENVIRONMENT", "prod"))
     
-    # Removed DualStorage instantiation
-    # dual_storage = DualStorage(app_environment=get_env_var("APP_ENVIRONMENT", "dev"))
-
     # Initialize Embedding Service
     openai_api_key = get_env_var("OPENAI_API_KEY")
     embedding_service = None
