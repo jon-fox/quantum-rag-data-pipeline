@@ -3,7 +3,7 @@ ERCOT API client for accessing ERCOT energy data
 """
 import logging
 import requests
-from .auth import get_auth_manager
+from src.data.ercot_api.auth import get_auth_manager
 import os
 
 # Configure logging

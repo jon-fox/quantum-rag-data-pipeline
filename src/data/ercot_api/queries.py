@@ -4,7 +4,7 @@ ERCOT API queries for common data endpoints
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
-from .client import ERCOTClient
+from src.data.ercot_api.client import ERCOTClient
 
 # Configure logging
 logger = logging.getLogger(__name__)
