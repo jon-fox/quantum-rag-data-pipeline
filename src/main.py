@@ -5,6 +5,7 @@ import asyncio
 from datetime import datetime, timedelta
 import json
 import numpy as np
+from typing import Optional, Dict
 
 # Absolute imports from 'src'
 from .config.env_manager import load_environment, get_env_var
@@ -12,7 +13,8 @@ from .data.ercot_api.client import ERCOTClient
 from .data.ercot_api.queries import ERCOTQueries
 from .data.weather_api.weather import WeatherAPIClient
 from .storage.pgvector_storage import PgVectorStorage
-from .services.embedding_service import EmbeddingService
+from .services.embedding_service import EmbeddingService # Keep this if still directly used in main
+from .services.sentence_builder import create_semantic_sentence # Corrected import path
 
 LOCATIONS = {
     "houston_temp_c": "Houston,TX,USA", 
@@ -24,135 +26,245 @@ LOCATIONS = {
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-async def fetch_and_store_ercot_data(ercot_queries: ERCOTQueries, pg_storage: PgVectorStorage, date_to_fetch: str, embedding_service=None):
-    """Fetches ERCOT data for a specific date, generates embeddings, and stores it."""
-    logger.info(f"Starting ERCOT data fetch and store process for date: {date_to_fetch}...")
+# create_semantic_sentence function is now in src.services.sentence_builder.py
+
+async def fetch_daily_ercot_metric(ercot_queries: ERCOTQueries, date_to_fetch: str) -> Optional[float]:
+    """Fetches and processes ERCOT data to get a single daily generation metric."""
+    logger.info(f"Fetching ERCOT generation metric for {date_to_fetch}...")
     try:
-        # Fetch data for the specific single day by setting both from and to the same date.
-        gen_summary = ercot_queries.get_agg_gen_summary(
+        gen_summary_response = ercot_queries.get_agg_gen_summary(
             delivery_date_from_override=date_to_fetch, 
             delivery_date_to_override=date_to_fetch
         )
-        records = gen_summary.get('data', []) 
-        logger.info(f"Fetched {len(records)} generation summary records for {date_to_fetch}.")
         
+        records = gen_summary_response.get('data', [])
         if not records:
-            logger.info("No generation summary records to process.")
-            return
+            logger.info(f"No ERCOT generation records found for {date_to_fetch}.")
+            return None
+        
+        total_generation_for_day = 0.0
+        generation_field_found = False
 
-        for record in records:
-            # Ensure 'id_field_or_hash' and 'timestamp_field' are actual keys in your record or use appropriate fallbacks
-            record_id_key = record.get('id_field_or_hash', str(hash(json.dumps(record)))) # Fallback for ID
-            document_id = f"ercot_gen_{record_id_key}"
-            document_content_for_embedding = json.dumps(record) 
-            
-            if embedding_service:
-                embedding = embedding_service.generate_embedding(document_content_for_embedding)
-            else:
-                logger.warning(f"Embedding service not available for record {document_id}. Using placeholder embedding.")
-                embedding = np.random.rand(1536).astype(np.float32)
-            
-            # Metadata is generated but not stored with PgVectorStorage alone after DualStorage removal.
-            # If metadata storage is needed, PgVectorStorage or another mechanism would need to handle it.
-            metadata = {
-                "document_id": document_id,
-                "doc_type": "ercot_generation_summary",
-                "source": "ERCOT API",
-                "data_timestamp": record.get('timestamp_field', datetime.now().isoformat()), # Fallback for timestamp
-                "raw_data_snippet": str(record)[:200] 
-            }
-            logger.debug(f"Generated metadata for {document_id} (currently not stored): {metadata}")
+        # Prioritize known total fields, then attempt to sum interval fields if multiple records exist.
+        possible_total_fields = ['TOTAL_GEN', 'totalActualGenerationMW', 'totalMW', 'sumActualGeneration']
+        possible_interval_fields = ['actualGeneration', 'MWH_Output', 'Value']
 
-            store_success = pg_storage.store_embedding(vector_id=document_id, embedding=embedding)
-            if store_success:
-                logger.info(f"Successfully stored ERCOT gen embedding: {document_id}")
-            else:
-                logger.error(f"Failed to store ERCOT gen embedding: {document_id}")
+        if len(records) == 1: # Likely a single summary record
+            record = records[0]
+            for field_name in possible_total_fields:
+                if field_name in record and record[field_name] is not None:
+                    try:
+                        total_generation_for_day = float(record[field_name])
+                        generation_field_found = True
+                        break 
+                    except (ValueError, TypeError):
+                        logger.warning(f"Could not convert field '{field_name}' value '{record[field_name]}' to float for {date_to_fetch}.")
+        
+        if not generation_field_found and records: # If not found in a single record or multiple records exist
+            logger.info(f"Attempting to sum interval generation fields for {date_to_fetch}.")
+            for record in records:
+                for field_name in possible_interval_fields:
+                    if field_name in record and record[field_name] is not None:
+                        try:
+                            total_generation_for_day += float(record[field_name])
+                            generation_field_found = True 
+                        except (ValueError, TypeError):
+                            logger.warning(f"Could not convert interval field '{field_name}' value '{record[field_name]}' to float for {date_to_fetch}.")
+                        break # Assume one relevant interval field per record
+        
+        if not generation_field_found:
+            logger.warning(f"Could not identify or sum a generation metric from ERCOT data for {date_to_fetch}. Records sample: {json.dumps(records[:1])}")
+            return None
 
-        # TODO: Add similar processing for other ERCOT endpoints (load summary, ancillary services)
-        logger.info("ERCOT data fetch and store process completed.")
+        logger.info(f"Processed ERCOT generation metric for {date_to_fetch}: {total_generation_for_day}")
+        return float(total_generation_for_day)
+
     except Exception as e:
-        logger.error(f"Error during ERCOT data processing: {e}", exc_info=True)
+        logger.error(f"Error fetching/processing ERCOT daily metric for {date_to_fetch}: {e}", exc_info=True)
+        return None
+
+async def fetch_daily_weather_metrics(weather_client: WeatherAPIClient, date_to_fetch: str) -> Optional[Dict[str, float]]:
+    """Fetches and processes weather data to get key daily temperature metrics."""
+    logger.info(f"Fetching weather metrics for {date_to_fetch}...")
+    try:
+        weather_df = weather_client.get_historical_weather(date_str=date_to_fetch, locations=LOCATIONS)
+        if weather_df.empty:
+            logger.info(f"No weather data found for {date_to_fetch}.")
+            return None
+
+        # Assuming the first row of the DataFrame is the daily summary.
+        first_row = weather_df.iloc[0]
+        metrics = {
+            "avg_temp_c": float(first_row.get('avg_temperature_c', np.nan)),
+            "houston_temp_c": float(first_row.get('houston_temp_c', np.nan)),
+            "austin_temp_c": float(first_row.get('austin_temp_c', np.nan)),
+            "dallas_temp_c": float(first_row.get('dallas_temp_c', np.nan)),
+        }
+        # Filter out NaN values if any field failed to convert or was missing
+        metrics = {k: v for k, v in metrics.items() if not np.isnan(v)}
+        if not metrics: # If all metrics ended up as NaN
+             logger.warning(f"All weather metrics were NaN for {date_to_fetch}.")
+             return None
+
+        logger.info(f"Processed weather metrics for {date_to_fetch}: {metrics}")
+        return metrics
+    except Exception as e:
+        logger.error(f"Error fetching/processing weather daily metrics for {date_to_fetch}: {e}", exc_info=True)
+        return None
+
+async def process_and_embed_daily_summary(
+    date_to_process: str, 
+    ercot_queries: ERCOTQueries, 
+    weather_client: Optional[WeatherAPIClient], 
+    pg_storage: PgVectorStorage, 
+    embedding_service: Optional[EmbeddingService]
+):
+    """Orchestrates fetching, processing, sentence creation, embedding, and storage for a single day."""
+    logger.info(f"Processing daily summary for embedding on {date_to_process}...")
+
+    ercot_metric = await fetch_daily_ercot_metric(ercot_queries, date_to_process)
+    
+    weather_metrics = None
+    if weather_client:
+        weather_metrics = await fetch_daily_weather_metrics(weather_client, date_to_process)
+    else:
+        logger.info(f"Weather client not available, skipping weather metrics for {date_to_process}.")
+
+    if ercot_metric is None:
+        logger.warning(f"Could not retrieve ERCOT metric for {date_to_process}. Skipping embedding.")
+        return
+    
+    # If weather client was available but metrics couldn't be fetched, log it.
+    # create_semantic_sentence is expected to handle None weather_metrics.
+    if weather_client and weather_metrics is None:
+        logger.warning(f"Could not retrieve Weather metrics for {date_to_process} (weather client was available).")
+
+    semantic_sentence = create_semantic_sentence(date_to_process, ercot_metric, weather_metrics)
+
+    if not semantic_sentence:
+        logger.warning(f"Semantic sentence could not be created for {date_to_process}. Skipping embedding.")
+        return
+
+    logger.info(f"Generated semantic sentence for {date_to_process}: \"{semantic_sentence}\"")
+
+    if not embedding_service:
+        logger.warning(f"Embedding service not available. Cannot generate embedding for {date_to_process}.")
+        return
+        
+    try:
+        embedding_list = embedding_service.generate_embedding(semantic_sentence)
+        if embedding_list is None:
+            logger.error(f"Embedding generation failed for {date_to_process}, received None.")
+            return
+        
+        embedding_array = np.array(embedding_list).astype(np.float32)
+        vector_id = f"daily_summary_{date_to_process}" 
+        
+        store_success = pg_storage.store_embedding(vector_id=vector_id, embedding=embedding_array)
+        if store_success:
+            logger.info(f"Successfully stored combined daily embedding for {date_to_process} with ID {vector_id}.")
+        else:
+            logger.error(f"Failed to store combined daily embedding for {date_to_process}.")
+    except Exception as e:
+        logger.error(f"Error generating or storing embedding for {date_to_process}: {e}", exc_info=True)
+
+# Removed fetch_and_store_ercot_data function
 
 async def fetch_and_store_weather_data(weather_client: WeatherAPIClient, pg_storage: PgVectorStorage, date_to_fetch: str):
-    """Fetches historical weather data for a specific date and stores it in PostgreSQL."""
-    logger.info(f"Starting weather data fetch and store process for date: {date_to_fetch}...")
+    """Fetches historical weather data and stores the raw DataFrame."""
+    logger.info(f"Fetching and storing raw weather data for {date_to_fetch}...")
     try:
-        # DataFrame columns: time, houston_temp_c, austin_temp_c, dallas_temp_c, avg_temperature_c, avg_temperature_f
         weather_df = weather_client.get_historical_weather(date_str=date_to_fetch, locations=LOCATIONS)
         
-        if not weather_df.empty:
-            logger.info(f"Fetched {len(weather_df)} weather records for {date_to_fetch}.")
-            
-            if 'time' in weather_df.columns:
-                 weather_df.rename(columns={'time': 'timestamp'}, inplace=True) # Match table schema
-            
-            table_columns = ['timestamp', 'houston_temp_c', 'austin_temp_c', 'dallas_temp_c', 'avg_temperature_c', 'avg_temperature_f']
-            df_to_insert = weather_df[[col for col in table_columns if col in weather_df.columns]]
-
-            pg_storage.insert_dataframe_to_table(df_to_insert, 'historical_weather_data')
-            logger.info(f"Weather data for {len(df_to_insert)} records processed and stored in 'historical_weather_data'.")
-        else:
+        if weather_df.empty:
             logger.info(f"No weather data fetched for {date_to_fetch}.")
+            return
+            
+        logger.info(f"Fetched {len(weather_df)} weather records for {date_to_fetch}.")
+        
+        if 'time' in weather_df.columns:
+             weather_df.rename(columns={'time': 'timestamp'}, inplace=True)
+        
+        # Ensure only relevant columns are selected for insertion
+        table_columns = ['timestamp', 'houston_temp_c', 'austin_temp_c', 'dallas_temp_c', 'avg_temperature_c', 'avg_temperature_f']
+        df_to_insert = weather_df[[col for col in table_columns if col in weather_df.columns]]
+
+        if not df_to_insert.empty:
+            pg_storage.insert_dataframe_to_table(df_to_insert, 'historical_weather_data')
+            logger.info(f"Stored {len(df_to_insert)} weather records for {date_to_fetch} in 'historical_weather_data'.")
+        else:
+            logger.info(f"No relevant columns for weather data insertion for {date_to_fetch}.")
             
     except Exception as e:
-        logger.error(f"Error during weather data processing: {e}", exc_info=True)
+        logger.error(f"Error during weather data processing for {date_to_fetch}: {e}", exc_info=True)
 
-async def main_ingestion_pipeline(days_to_fetch_ercot=1, days_to_fetch_weather=1):
+async def main_ingestion_pipeline():
     """Main function to orchestrate the data ingestion pipeline."""
     logger.info("Initializing data ingestion pipeline...")
     
     load_environment()
 
+    days_to_process_for_embeddings = int(get_env_var("DAYS_TO_PROCESS_FOR_EMBEDDINGS", "1"))
+    days_to_store_raw_weather = int(get_env_var("DAYS_TO_STORE_RAW_WEATHER", "1")) 
+
     ercot_client = ERCOTClient()
-    # Initialize ERCOTQueries without global date overrides, so methods use their defaults or passed overrides
     ercot_queries = ERCOTQueries(client=ercot_client)
     
-    weather_api_key = get_env_var("WEATHER_API_KEY")
     weather_client = None
-    if not weather_api_key:
-        logger.warning("WEATHER_API_KEY not found. Weather data ingestion will be skipped.")
-    else:
+    weather_api_key = get_env_var("WEATHER_API_KEY")
+    if weather_api_key:
         weather_client = WeatherAPIClient(api_key=weather_api_key)
+    else:
+        logger.warning("WEATHER_API_KEY not found. Weather data tasks will be skipped.")
 
-    # PgVectorStorage loads DB params from env by default. lazy_init=False ensures schema is checked/created.
     pg_vector_storage = PgVectorStorage(lazy_init=False, app_environment=get_env_var("APP_ENVIRONMENT", "prod"))
     
-    # Initialize Embedding Service
-    openai_api_key = get_env_var("OPENAI_API_KEY")
     embedding_service = None
+    openai_api_key = get_env_var("OPENAI_API_KEY")
     if openai_api_key:
         try:
             embedding_service = EmbeddingService(api_key=openai_api_key)
             logger.info("Embedding service initialized.")
         except Exception as e:
             logger.error(f"Failed to initialize EmbeddingService: {e}", exc_info=True)
-            embedding_service = None # Ensure it's None if initialization fails
     else:
-        logger.warning("OPENAI_API_KEY not found. Embedding-dependent tasks will use placeholder embeddings or may fail.")
+        logger.warning("OPENAI_API_KEY not found. Embedding tasks will be skipped.")
     
     logger.info("--- Starting Data Ingestion Tasks ---")
-
     today = datetime.today()
 
-    # Fetch ERCOT data for the configured number of past days
-    for i in range(1, days_to_fetch_ercot + 1):
-        date_for_ercot = (today - timedelta(days=i)).strftime('%Y-%m-%d')
-        logger.info(f"Requesting ERCOT data for: {date_for_ercot}")
-        await fetch_and_store_ercot_data(ercot_queries, pg_vector_storage, date_for_ercot, embedding_service)
-    logger.info(f"ERCOT data processing tasks called for the last {days_to_fetch_ercot} day(s).")
+    # Process and Embed Combined Daily Summaries
+    logger.info(f"--- Starting Combined Daily Summary Embedding for the last {days_to_process_for_embeddings} day(s) ---")
+    embedding_tasks = []
+    for i in range(1, days_to_process_for_embeddings + 1):
+        date_to_process = (today - timedelta(days=i)).strftime('%Y-%m-%d')
+        embedding_tasks.append(
+            process_and_embed_daily_summary(
+                date_to_process, 
+                ercot_queries, 
+                weather_client,
+                pg_vector_storage, 
+                embedding_service
+            )
+        )
+    if embedding_tasks:
+        await asyncio.gather(*embedding_tasks)
+    logger.info(f"Combined daily summary embedding tasks completed for the last {days_to_process_for_embeddings} day(s).")
 
+    # Store Raw Weather Data
     if weather_client:
-        # Fetch Weather data for the configured number of past days
-        for i in range(1, days_to_fetch_weather + 1):
-            date_for_weather = (today - timedelta(days=i)).strftime('%Y-%m-%d')
-            logger.info(f"Requesting Weather data for: {date_for_weather}")
-            await fetch_and_store_weather_data(weather_client, pg_vector_storage, date_for_weather)
-        logger.info(f"Weather data processing tasks called for the last {days_to_fetch_weather} day(s).")
+        logger.info(f"--- Starting Raw Weather DataFrame Storage for the last {days_to_store_raw_weather} day(s) ---")
+        weather_storage_tasks = []
+        for i in range(1, days_to_store_raw_weather + 1):
+            date_for_weather_storage = (today - timedelta(days=i)).strftime('%Y-%m-%d')
+            weather_storage_tasks.append(
+                fetch_and_store_weather_data(weather_client, pg_vector_storage, date_for_weather_storage)
+            )
+        if weather_storage_tasks:
+            await asyncio.gather(*weather_storage_tasks)
+        logger.info(f"Raw weather DataFrame storage tasks completed for the last {days_to_store_raw_weather} day(s).")
     else:
-        logger.info("Skipping weather data ingestion as client is not initialized.")
-
-    logger.info("Data ingestion pipeline tasks initiated.")
+        logger.info("Skipping raw weather DataFrame storage as weather client is not initialized.")
     
     # Graceful shutdown
     if hasattr(ercot_client, 'auth_manager') and hasattr(ercot_client.auth_manager, 'shutdown'):
@@ -160,8 +272,8 @@ async def main_ingestion_pipeline(days_to_fetch_ercot=1, days_to_fetch_weather=1
         logger.info("ERCOT Auth Manager shutdown called.")
     
     pg_vector_storage.close_db_connection()
-    # Removed: dual_storage.close_connections()
     logger.info("Database connections closed.")
+    logger.info("Data ingestion pipeline finished.")
 
 if __name__ == "__main__":
     logger.info("Starting main.py script...")
