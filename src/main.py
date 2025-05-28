@@ -24,14 +24,17 @@ LOCATIONS = {
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-async def fetch_and_store_ercot_data(ercot_queries: ERCOTQueries, pg_storage: PgVectorStorage, embedding_service=None):
-    """Fetches ERCOT data, generates embeddings, and stores it using PgVectorStorage."""
-    logger.info("Starting ERCOT data fetch and store process...")
+async def fetch_and_store_ercot_data(ercot_queries: ERCOTQueries, pg_storage: PgVectorStorage, date_to_fetch: str, embedding_service=None):
+    """Fetches ERCOT data for a specific date, generates embeddings, and stores it."""
+    logger.info(f"Starting ERCOT data fetch and store process for date: {date_to_fetch}...")
     try:
-        gen_summary = ercot_queries.get_agg_gen_summary()
-        # Actual data is usually in a sub-key like 'data' or 'docs'. This may need adjustment based on API.
+        # Fetch data for the specific single day by setting both from and to the same date.
+        gen_summary = ercot_queries.get_agg_gen_summary(
+            delivery_date_from_override=date_to_fetch, 
+            delivery_date_to_override=date_to_fetch
+        )
         records = gen_summary.get('data', []) 
-        logger.info(f"Fetched {len(records)} generation summary records.")
+        logger.info(f"Fetched {len(records)} generation summary records for {date_to_fetch}.")
         
         if not records:
             logger.info("No generation summary records to process.")
@@ -71,19 +74,15 @@ async def fetch_and_store_ercot_data(ercot_queries: ERCOTQueries, pg_storage: Pg
     except Exception as e:
         logger.error(f"Error during ERCOT data processing: {e}", exc_info=True)
 
-async def fetch_and_store_weather_data(weather_client: WeatherAPIClient, pg_storage: PgVectorStorage):
-    """Fetches historical weather data and stores it in PostgreSQL."""
-    logger.info("Starting weather data fetch and store process...")
+async def fetch_and_store_weather_data(weather_client: WeatherAPIClient, pg_storage: PgVectorStorage, date_to_fetch: str):
+    """Fetches historical weather data for a specific date and stores it in PostgreSQL."""
+    logger.info(f"Starting weather data fetch and store process for date: {date_to_fetch}...")
     try:
-        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-
         # DataFrame columns: time, houston_temp_c, austin_temp_c, dallas_temp_c, avg_temperature_c, avg_temperature_f
-        weather_df = weather_client.get_historical_weather(date_str=yesterday, locations=LOCATIONS)
+        weather_df = weather_client.get_historical_weather(date_str=date_to_fetch, locations=LOCATIONS)
         
         if not weather_df.empty:
-            logger.info(f"Fetched {len(weather_df)} weather records for {yesterday}.")
-            # Storing weather_df in 'historical_weather_data' table.
-            # Table columns: timestamp, houston_temp_c, austin_temp_c, dallas_temp_c, avg_temperature_c, avg_temperature_f
+            logger.info(f"Fetched {len(weather_df)} weather records for {date_to_fetch}.")
             
             if 'time' in weather_df.columns:
                  weather_df.rename(columns={'time': 'timestamp'}, inplace=True) # Match table schema
@@ -94,18 +93,19 @@ async def fetch_and_store_weather_data(weather_client: WeatherAPIClient, pg_stor
             pg_storage.insert_dataframe_to_table(df_to_insert, 'historical_weather_data')
             logger.info(f"Weather data for {len(df_to_insert)} records processed and stored in 'historical_weather_data'.")
         else:
-            logger.info(f"No weather data fetched for {yesterday}.")
+            logger.info(f"No weather data fetched for {date_to_fetch}.")
             
     except Exception as e:
         logger.error(f"Error during weather data processing: {e}", exc_info=True)
 
-async def main_ingestion_pipeline():
+async def main_ingestion_pipeline(days_to_fetch_ercot=1, days_to_fetch_weather=1):
     """Main function to orchestrate the data ingestion pipeline."""
     logger.info("Initializing data ingestion pipeline...")
     
     load_environment()
-    
+
     ercot_client = ERCOTClient()
+    # Initialize ERCOTQueries without global date overrides, so methods use their defaults or passed overrides
     ercot_queries = ERCOTQueries(client=ercot_client)
     
     weather_api_key = get_env_var("WEATHER_API_KEY")
@@ -132,13 +132,23 @@ async def main_ingestion_pipeline():
         logger.warning("OPENAI_API_KEY not found. Embedding-dependent tasks will use placeholder embeddings or may fail.")
     
     logger.info("--- Starting Data Ingestion Tasks ---")
-    
-    await fetch_and_store_ercot_data(ercot_queries, pg_vector_storage, embedding_service)
-    logger.info("ERCOT data processing task called.")
+
+    today = datetime.today()
+
+    # Fetch ERCOT data for the configured number of past days
+    for i in range(1, days_to_fetch_ercot + 1):
+        date_for_ercot = (today - timedelta(days=i)).strftime('%Y-%m-%d')
+        logger.info(f"Requesting ERCOT data for: {date_for_ercot}")
+        await fetch_and_store_ercot_data(ercot_queries, pg_vector_storage, date_for_ercot, embedding_service)
+    logger.info(f"ERCOT data processing tasks called for the last {days_to_fetch_ercot} day(s).")
 
     if weather_client:
-        await fetch_and_store_weather_data(weather_client, pg_vector_storage)
-        logger.info("Weather data processing task called.")
+        # Fetch Weather data for the configured number of past days
+        for i in range(1, days_to_fetch_weather + 1):
+            date_for_weather = (today - timedelta(days=i)).strftime('%Y-%m-%d')
+            logger.info(f"Requesting Weather data for: {date_for_weather}")
+            await fetch_and_store_weather_data(weather_client, pg_vector_storage, date_for_weather)
+        logger.info(f"Weather data processing tasks called for the last {days_to_fetch_weather} day(s).")
     else:
         logger.info("Skipping weather data ingestion as client is not initialized.")
 
