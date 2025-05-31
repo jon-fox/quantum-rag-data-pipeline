@@ -1,5 +1,3 @@
-import os
-import sys
 import logging
 import asyncio
 from datetime import datetime, timedelta
@@ -156,7 +154,7 @@ async def main_ingestion_pipeline():
     else:
         logger.warning("WEATHER_API_KEY not found. Weather data tasks will be skipped.")
 
-    pg_vector_storage = PgVectorStorage(lazy_init=False, app_environment=get_env_var("APP_ENVIRONMENT", "prod"))
+    pg_vector_storage = PgVectorStorage(app_environment=get_env_var("APP_ENVIRONMENT", "prod"))
     
     embedding_service = None
     openai_api_key = get_env_var("OPENAI_API_KEY")

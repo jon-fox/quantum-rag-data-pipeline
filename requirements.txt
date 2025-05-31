@@ -3,3 +3,5 @@ numpy
 boto3
 python-dotenv
 pandas
+requests
+openai

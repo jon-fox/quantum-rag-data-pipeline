@@ -39,7 +39,7 @@ def create_historical_weather_table():
         logger.info("Attempting to get PostgreSQL connection via PgVectorStorage...")
         # Accessing the protected _get_connection method as per user request context.
         # This method establishes a new connection if one isn't active or returns an existing one.
-        conn = pg_storage_instance._get_connection(retry=False)
+        conn = pg_storage_instance._get_connection()
 
         if not conn:
             logger.error("Failed to get PostgreSQL connection from PgVectorStorage. Aborting.")
