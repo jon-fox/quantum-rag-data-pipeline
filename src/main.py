@@ -25,17 +25,29 @@ logger = logging.getLogger(__name__)
 
 async def fetch_daily_ercot_metric(ercot_queries: ERCOTQueries, date_to_fetch: str) -> Optional[float]:
     """Fetches and processes ERCOT data to get a single daily generation metric."""
-    logger.info(f"Fetching ERCOT generation metric for {date_to_fetch}...")
+    logger.info(f"Starting fetch_daily_ercot_metric for date: {date_to_fetch}")
+    
     try:
+        logger.info(f"Calling ercot_queries.get_agg_gen_summary with date range: {date_to_fetch} to {date_to_fetch}")
         gen_summary_response = ercot_queries.get_agg_gen_summary(
             delivery_date_from_override=date_to_fetch, 
             delivery_date_to_override=date_to_fetch
         )
         
+        logger.info(f"API response received. Type: {type(gen_summary_response)}")
+        if isinstance(gen_summary_response, dict):
+            logger.info(f"Response keys: {list(gen_summary_response.keys())}")
+        
         records = gen_summary_response.get('data', [])
+        logger.info(f"Found {len(records)} records in response data")
+        
         if not records:
-            logger.info(f"No ERCOT generation records found for {date_to_fetch}.")
+            logger.warning(f"No ERCOT generation records found for {date_to_fetch}. Response structure: {json.dumps(gen_summary_response, indent=2)[:500]}...")
             return None
+        
+        # Log first record structure for debugging
+        logger.info(f"First record keys: {list(records[0].keys())}")
+        logger.info(f"First record sample: {json.dumps(records[0], indent=2)[:500]}...")
         
         total_generation_for_day = 0.0
         generation_field_found = False
@@ -43,39 +55,77 @@ async def fetch_daily_ercot_metric(ercot_queries: ERCOTQueries, date_to_fetch: s
         # Prioritize known total fields, then attempt to sum interval fields if multiple records exist.
         possible_total_fields = ['TOTAL_GEN', 'totalActualGenerationMW', 'totalMW', 'sumActualGeneration']
         possible_interval_fields = ['actualGeneration', 'MWH_Output', 'Value']
+        
+        logger.info(f"Processing {len(records)} records. Using total fields: {possible_total_fields}")
+        logger.info(f"Fallback interval fields: {possible_interval_fields}")
 
         if len(records) == 1: # Likely a single summary record
+            logger.info("Single record detected - attempting to find total generation field")
             record = records[0]
+            
             for field_name in possible_total_fields:
-                if field_name in record and record[field_name] is not None:
-                    try:
-                        total_generation_for_day = float(record[field_name])
-                        generation_field_found = True
-                        break 
-                    except (ValueError, TypeError):
-                        logger.warning(f"Could not convert field '{field_name}' value '{record[field_name]}' to float for {date_to_fetch}.")
+                logger.debug(f"Checking for field '{field_name}' in record...")
+                if field_name in record:
+                    field_value = record[field_name]
+                    logger.info(f"Field '{field_name}' found with value: {field_value} (type: {type(field_value)})")
+                    
+                    if field_value is not None:
+                        try:
+                            total_generation_for_day = float(field_value)
+                            generation_field_found = True
+                            logger.info(f"Successfully converted '{field_name}' to float: {total_generation_for_day}")
+                            break 
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"Could not convert field '{field_name}' value '{field_value}' to float for {date_to_fetch}. Error: {e}")
+                    else:
+                        logger.debug(f"Field '{field_name}' is None, skipping")
+                else:
+                    logger.debug(f"Field '{field_name}' not found in record")
         
         if not generation_field_found and records: # If not found in a single record or multiple records exist
-            logger.info(f"Attempting to sum interval generation fields for {date_to_fetch}.")
-            for record in records:
+            logger.info(f"No total field found or multiple records exist. Attempting to sum {len(records)} interval records")
+            
+            for idx, record in enumerate(records):
+                logger.debug(f"Processing record {idx + 1}/{len(records)}")
+                record_found_field = False
+                
                 for field_name in possible_interval_fields:
-                    if field_name in record and record[field_name] is not None:
-                        try:
-                            total_generation_for_day += float(record[field_name])
-                            generation_field_found = True 
-                        except (ValueError, TypeError):
-                            logger.warning(f"Could not convert interval field '{field_name}' value '{record[field_name]}' to float for {date_to_fetch}.")
-                        break # Assume one relevant interval field per record
+                    if field_name in record:
+                        field_value = record[field_name]
+                        logger.debug(f"Record {idx + 1}: Field '{field_name}' found with value: {field_value} (type: {type(field_value)})")
+                        
+                        if field_value is not None:
+                            try:
+                                interval_value = float(field_value)
+                                total_generation_for_day += interval_value
+                                generation_field_found = True
+                                record_found_field = True
+                                logger.debug(f"Record {idx + 1}: Added {interval_value} to total. Running total: {total_generation_for_day}")
+                            except (ValueError, TypeError) as e:
+                                logger.warning(f"Record {idx + 1}: Could not convert interval field '{field_name}' value '{field_value}' to float. Error: {e}")
+                            break # Assume one relevant interval field per record
+                        else:
+                            logger.debug(f"Record {idx + 1}: Field '{field_name}' is None")
+                    else:
+                        logger.debug(f"Record {idx + 1}: Field '{field_name}' not found")
+                
+                if not record_found_field:
+                    logger.warning(f"Record {idx + 1}: No valid interval fields found. Available fields: {list(record.keys())}")
+            
+            logger.info(f"Completed summing interval records. Final total: {total_generation_for_day}")
         
         if not generation_field_found:
-            logger.warning(f"Could not identify or sum a generation metric from ERCOT data for {date_to_fetch}. Records sample: {json.dumps(records[:1])}")
+            logger.error(f"Could not identify or sum a generation metric from ERCOT data for {date_to_fetch}")
+            logger.error(f"Available fields in first record: {list(records[0].keys()) if records else 'No records'}")
+            logger.error(f"Records sample: {json.dumps(records[:2], indent=2)}")
             return None
 
-        logger.info(f"Processed ERCOT generation metric for {date_to_fetch}: {total_generation_for_day}")
+        logger.info(f"Successfully processed ERCOT generation metric for {date_to_fetch}: {total_generation_for_day}")
         return float(total_generation_for_day)
 
     except Exception as e:
-        logger.error(f"Error fetching/processing ERCOT daily metric for {date_to_fetch}: {e}", exc_info=True)
+        logger.error(f"Exception in fetch_daily_ercot_metric for {date_to_fetch}: {type(e).__name__}: {e}")
+        logger.error(f"Exception details:", exc_info=True)
         return None
 
 async def fetch_daily_weather_metrics(weather_client: WeatherAPIClient, date_to_fetch: str) -> Optional[Dict[str, float]]:
