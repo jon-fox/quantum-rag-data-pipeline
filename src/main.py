@@ -23,108 +23,72 @@ logger = logging.getLogger(__name__)
 # create_semantic_sentence function is now in src.services.sentence_builder.py
 # process_and_embed_daily_summary is now in src.services.sentence_builder.py
 
-async def fetch_daily_ercot_metric(ercot_queries: ERCOTQueries, date_to_fetch: str) -> Optional[float]:
+async def fetch_daily_ercot_metric(ercot_queries: ERCOTQueries, date_to_start_fetch: str, date_to_end_fetch: str) -> Optional[float]:
     """Fetches and processes ERCOT data to get a single daily generation metric."""
-    logger.info(f"Starting fetch_daily_ercot_metric for date: {date_to_fetch}")
+    logger.info(f"Starting fetch_daily_ercot_metric for date: {date_to_start_fetch} to {date_to_end_fetch}")
     
     try:
-        logger.info(f"Calling ercot_queries.get_agg_gen_summary with date range: {date_to_fetch} to {date_to_fetch}")
+        logger.info(f"Calling ercot_queries.get_agg_gen_summary with date range: {date_to_start_fetch} to {date_to_end_fetch}")
         gen_summary_response = ercot_queries.get_agg_gen_summary(
-            delivery_date_from_override=date_to_fetch, 
-            delivery_date_to_override=date_to_fetch
+            delivery_date_from_override=date_to_start_fetch, 
+            delivery_date_to_override=date_to_end_fetch
         )
         
         logger.info(f"API response received. Type: {type(gen_summary_response)}")
         if isinstance(gen_summary_response, dict):
             logger.info(f"Response keys: {list(gen_summary_response.keys())}")
         
+
+        # Extract data and field mappings
         records = gen_summary_response.get('data', [])
+        fields = gen_summary_response.get('fields', [])
+        
         logger.info(f"Found {len(records)} records in response data")
         
         if not records:
-            logger.warning(f"No ERCOT generation records found for {date_to_fetch}. Response structure: {json.dumps(gen_summary_response, indent=2)[:500]}...")
+            logger.warning(f"No ERCOT generation records found for {date_to_start_fetch} to {date_to_end_fetch}")
             return None
         
-        # Log first record structure for debugging
-        logger.info(f"First record keys: {list(records[0].keys())}")
-        logger.info(f"First record sample: {json.dumps(records[0], indent=2)[:500]}...")
+        # Create field name to index mapping from the fields metadata
+        field_mapping = {}
+        for i, field in enumerate(fields):
+            field_mapping[field['name']] = i
         
+        logger.info(f"Available fields: {list(field_mapping.keys())}")
+        
+        # Look for generation field - "sumGenTelemMW" is the total generation field
+        generation_field_index = field_mapping.get('sumGenTelemMW')
+        if generation_field_index is None:
+            logger.error(f"Could not find 'sumGenTelemMW' field in ERCOT data. Available fields: {list(field_mapping.keys())}")
+            return None
+        
+        logger.info(f"Found generation field 'sumGenTelemMW' at index {generation_field_index}")
+        
+        # Sum all generation values across time intervals
         total_generation_for_day = 0.0
-        generation_field_found = False
-
-        # Prioritize known total fields, then attempt to sum interval fields if multiple records exist.
-        possible_total_fields = ['TOTAL_GEN', 'totalActualGenerationMW', 'totalMW', 'sumActualGeneration']
-        possible_interval_fields = ['actualGeneration', 'MWH_Output', 'Value']
+        valid_records = 0
         
-        logger.info(f"Processing {len(records)} records. Using total fields: {possible_total_fields}")
-        logger.info(f"Fallback interval fields: {possible_interval_fields}")
-
-        if len(records) == 1: # Likely a single summary record
-            logger.info("Single record detected - attempting to find total generation field")
-            record = records[0]
-            
-            for field_name in possible_total_fields:
-                logger.debug(f"Checking for field '{field_name}' in record...")
-                if field_name in record:
-                    field_value = record[field_name]
-                    logger.info(f"Field '{field_name}' found with value: {field_value} (type: {type(field_value)})")
-                    
-                    if field_value is not None:
-                        try:
-                            total_generation_for_day = float(field_value)
-                            generation_field_found = True
-                            logger.info(f"Successfully converted '{field_name}' to float: {total_generation_for_day}")
-                            break 
-                        except (ValueError, TypeError) as e:
-                            logger.warning(f"Could not convert field '{field_name}' value '{field_value}' to float for {date_to_fetch}. Error: {e}")
-                    else:
-                        logger.debug(f"Field '{field_name}' is None, skipping")
-                else:
-                    logger.debug(f"Field '{field_name}' not found in record")
+        for idx, record in enumerate(records):
+            if len(record) > generation_field_index:
+                try:
+                    generation_value = float(record[generation_field_index])
+                    total_generation_for_day += generation_value
+                    valid_records += 1
+                    logger.debug(f"Record {idx + 1}: Added {generation_value} MW to total")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Record {idx + 1}: Could not convert generation value '{record[generation_field_index]}' to float. Error: {e}")
+            else:
+                logger.warning(f"Record {idx + 1}: Not enough fields ({len(record)} vs expected {generation_field_index + 1})")
         
-        if not generation_field_found and records: # If not found in a single record or multiple records exist
-            logger.info(f"No total field found or multiple records exist. Attempting to sum {len(records)} interval records")
-            
-            for idx, record in enumerate(records):
-                logger.debug(f"Processing record {idx + 1}/{len(records)}")
-                record_found_field = False
-                
-                for field_name in possible_interval_fields:
-                    if field_name in record:
-                        field_value = record[field_name]
-                        logger.debug(f"Record {idx + 1}: Field '{field_name}' found with value: {field_value} (type: {type(field_value)})")
-                        
-                        if field_value is not None:
-                            try:
-                                interval_value = float(field_value)
-                                total_generation_for_day += interval_value
-                                generation_field_found = True
-                                record_found_field = True
-                                logger.debug(f"Record {idx + 1}: Added {interval_value} to total. Running total: {total_generation_for_day}")
-                            except (ValueError, TypeError) as e:
-                                logger.warning(f"Record {idx + 1}: Could not convert interval field '{field_name}' value '{field_value}' to float. Error: {e}")
-                            break # Assume one relevant interval field per record
-                        else:
-                            logger.debug(f"Record {idx + 1}: Field '{field_name}' is None")
-                    else:
-                        logger.debug(f"Record {idx + 1}: Field '{field_name}' not found")
-                
-                if not record_found_field:
-                    logger.warning(f"Record {idx + 1}: No valid interval fields found. Available fields: {list(record.keys())}")
-            
-            logger.info(f"Completed summing interval records. Final total: {total_generation_for_day}")
-        
-        if not generation_field_found:
-            logger.error(f"Could not identify or sum a generation metric from ERCOT data for {date_to_fetch}")
-            logger.error(f"Available fields in first record: {list(records[0].keys()) if records else 'No records'}")
-            logger.error(f"Records sample: {json.dumps(records[:2], indent=2)}")
+        if valid_records == 0:
+            logger.error(f"No valid generation records found for {date_to_start_fetch} to {date_to_end_fetch}")
             return None
 
-        logger.info(f"Successfully processed ERCOT generation metric for {date_to_fetch}: {total_generation_for_day}")
+        logger.info(f"Successfully processed ERCOT generation metric for {date_to_start_fetch} to {date_to_end_fetch}: {total_generation_for_day} MW from {valid_records} records")
         return float(total_generation_for_day)
 
     except Exception as e:
-        logger.error(f"Exception in fetch_daily_ercot_metric for {date_to_fetch}: {type(e).__name__}: {e}")
+        logger.error(f"Exception in fetch_daily_ercot_metric for {date_to_start_fetch} to {date_to_end_fetch}: {type(e).__name__}: {e}")
         logger.error(f"Exception details:", exc_info=True)
         return None
 
@@ -224,11 +188,13 @@ async def main_ingestion_pipeline():
     logger.info(f"--- Starting Combined Daily Summary Embedding for the last {days_to_process_for_embeddings} day(s) ---")
     embedding_tasks = []
     for i in range(1, days_to_process_for_embeddings + 1):
-        date_to_process = (today - timedelta(days=i)).strftime('%Y-%m-%d')
+        target_date = today - timedelta(days=i)
+        previous_day = target_date - timedelta(days=1)
         embedding_tasks.append(
             process_and_embed_daily_summary( 
-                date_to_process=date_to_process, 
-                ercot_queries=ercot_queries, 
+                date_to_start_process=previous_day.strftime('%Y-%m-%d'),
+                date_to_end_process=target_date.strftime('%Y-%m-%d'), 
+                ercot_queries=ercot_queries,
                 weather_client=weather_client,
                 pg_storage=pg_vector_storage, 
                 embedding_service=embedding_service,

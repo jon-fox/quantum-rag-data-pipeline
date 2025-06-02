@@ -62,7 +62,8 @@ def create_semantic_sentence(
     return " ".join(sentence_parts)
 
 async def process_and_embed_daily_summary(
-    date_to_process: str, 
+    date_to_start_process: str, 
+    date_to_end_process: str, 
     ercot_queries: ERCOTQueries, 
     weather_client: Optional[WeatherAPIClient], 
     pg_storage: PgVectorStorage, 
@@ -71,48 +72,48 @@ async def process_and_embed_daily_summary(
     fetch_weather_metrics_func: Callable[[WeatherAPIClient, str], Awaitable[Optional[Dict[str, float]]]]
 ):
     """Orchestrates fetching, processing, sentence creation, embedding, and storage for a single day."""
-    logger.info(f"Processing daily summary for embedding on {date_to_process} (via sentence_builder)...")
+    logger.info(f"Processing daily summary for embedding on {date_to_start_process} (via sentence_builder)...")
 
-    ercot_metric = await fetch_ercot_metric_func(ercot_queries, date_to_process)
+    ercot_metric = await fetch_ercot_metric_func(ercot_queries, date_to_start_process, date_to_end_process)
     
     weather_metrics = None
     if weather_client:
-        weather_metrics = await fetch_weather_metrics_func(weather_client, date_to_process)
+        weather_metrics = await fetch_weather_metrics_func(weather_client, date_to_start_process)
     else:
-        logger.info(f"Weather client not available, skipping weather metrics for {date_to_process}.")
+        logger.info(f"Weather client not available, skipping weather metrics for {date_to_start_process} to {date_to_end_process}.")
 
     if ercot_metric is None:
-        logger.warning(f"Could not retrieve ERCOT metric for {date_to_process}. Skipping embedding.")
+        logger.warning(f"Could not retrieve ERCOT metric for {date_to_start_process} to {date_to_end_process}. Skipping embedding.")
         return
     
     if weather_client and weather_metrics is None:
-        logger.warning(f"Could not retrieve Weather metrics for {date_to_process} (weather client was available).")
+        logger.warning(f"Could not retrieve Weather metrics for {date_to_start_process} to {date_to_end_process} (weather client was available).")
 
-    semantic_sentence = create_semantic_sentence(date_to_process, ercot_metric, weather_metrics)
+    semantic_sentence = create_semantic_sentence(date_to_start_process, ercot_metric, weather_metrics)
 
     if not semantic_sentence:
-        logger.warning(f"Semantic sentence could not be created for {date_to_process}. Skipping embedding.")
+        logger.warning(f"Semantic sentence could not be created for {date_to_start_process} to {date_to_end_process}. Skipping embedding.")
         return
 
-    logger.info(f"Generated semantic sentence for {date_to_process}: \"{semantic_sentence}\"")
+    logger.info(f"Generated semantic sentence for {date_to_start_process} to {date_to_end_process}: \"{semantic_sentence}\"")
 
     if not embedding_service:
-        logger.warning(f"Embedding service not available. Cannot generate embedding for {date_to_process}.")
+        logger.warning(f"Embedding service not available. Cannot generate embedding for {date_to_start_process} to {date_to_end_process}.")
         return
         
     try:
         embedding_list = embedding_service.generate_embedding(semantic_sentence)
         if embedding_list is None:
-            logger.error(f"Embedding generation failed for {date_to_process}, received None.")
+            logger.error(f"Embedding generation failed for {date_to_start_process} to {date_to_end_process}, received None.")
             return
         
         embedding_array = np.array(embedding_list).astype(np.float32)
-        vector_id = f"daily_summary_{date_to_process}" 
+        vector_id = f"daily_summary_{date_to_start_process}" 
         
         store_success = pg_storage.store_embedding(vector_id=vector_id, embedding=embedding_array)
         if store_success:
-            logger.info(f"Successfully stored combined daily embedding for {date_to_process} with ID {vector_id}.")
+            logger.info(f"Successfully stored combined daily embedding for {date_to_start_process} to {date_to_end_process} with ID {vector_id}.")
         else:
-            logger.error(f"Failed to store combined daily embedding for {date_to_process}.")
+            logger.error(f"Failed to store combined daily embedding for {date_to_start_process} to {date_to_end_process}.")
     except Exception as e:
-        logger.error(f"Error generating or storing embedding for {date_to_process}: {e}", exc_info=True)
+        logger.error(f"Error generating or storing embedding for {date_to_start_process} to {date_to_end_process}: {e}", exc_info=True)
