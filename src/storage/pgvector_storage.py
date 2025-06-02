@@ -86,10 +86,8 @@ class PgVectorStorage:
             # Ensure table exists with correct schema
             with conn.cursor() as cur:
                 cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-                # Drop and recreate table to fix UUID -> TEXT column type
-                cur.execute(sql.SQL("CREATE TABLE IF NOT EXISTS {table};").format(table=sql.Identifier(self.table_name)))
                 cur.execute(sql.SQL("""
-                    CREATE TABLE {table} (
+                    CREATE TABLE IF NOT EXISTS {table} (
                         vector_id TEXT PRIMARY KEY,
                         embedding VECTOR(1536),
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
