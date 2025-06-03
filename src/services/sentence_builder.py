@@ -171,7 +171,7 @@ async def process_and_embed_daily_summary(
         embedding_array = np.array(embedding_list).astype(np.float32)
         vector_id = f"daily_summary_{date_to_start_process}" 
         
-        store_success = pg_storage.store_embedding(vector_id=vector_id, embedding=embedding_array)
+        store_success = pg_storage.store_embedding(vector_id=vector_id, embedding=embedding_array, semantic_sentence=semantic_sentence)
         if store_success:
             logger.info(f"Successfully stored combined daily embedding for {date_to_start_process} to {date_to_end_process} with ID {vector_id}.")
         else:

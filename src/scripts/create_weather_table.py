@@ -54,6 +54,9 @@ def create_historical_weather_table():
                 houston_temp_c REAL,
                 austin_temp_c REAL,
                 dallas_temp_c REAL,
+                san_antonio_temp_c REAL,
+                fort_worth_temp_c REAL,
+                corpus_christi_temp_c REAL,
                 avg_temperature_c REAL,
                 avg_temperature_f REAL
             );
@@ -68,6 +71,9 @@ def create_historical_weather_table():
                 "COMMENT ON COLUMN historical_weather_data.houston_temp_c IS 'Temperature in Houston, Texas, in Celsius.';",
                 "COMMENT ON COLUMN historical_weather_data.austin_temp_c IS 'Temperature in Austin, Texas, in Celsius.';",
                 "COMMENT ON COLUMN historical_weather_data.dallas_temp_c IS 'Temperature in Dallas, Texas, in Celsius.';",
+                "COMMENT ON COLUMN historical_weather_data.san_antonio_temp_c IS 'Temperature in San Antonio, Texas, in Celsius.';",
+                "COMMENT ON COLUMN historical_weather_data.fort_worth_temp_c IS 'Temperature in Fort Worth, Texas, in Celsius.';",
+                "COMMENT ON COLUMN historical_weather_data.corpus_christi_temp_c IS 'Temperature in Corpus Christi, Texas, in Celsius.';",
                 "COMMENT ON COLUMN historical_weather_data.avg_temperature_c IS 'Average temperature across the monitored cities, in Celsius.';",
                 "COMMENT ON COLUMN historical_weather_data.avg_temperature_f IS 'Average temperature across the monitored cities, in Fahrenheit.';"
             ]

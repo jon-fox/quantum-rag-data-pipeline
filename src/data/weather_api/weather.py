@@ -134,7 +134,7 @@ class WeatherAPIClient:
                 pg_storage_instance = PgVectorStorage(app_environment=app_env)
                 
                 # Define the expected DB columns based on create_weather_table.py
-                db_schema_columns = ['timestamp', 'houston_temp_c', 'austin_temp_c', 'dallas_temp_c', 'avg_temperature_c', 'avg_temperature_f']
+                db_schema_columns = ['timestamp', 'houston_temp_c', 'austin_temp_c', 'dallas_temp_c', 'san_antonio_temp_c', 'fort_worth_temp_c', 'corpus_christi_temp_c', 'avg_temperature_c', 'avg_temperature_f']
                 # Filter DataFrame to only include columns that exist in the DB schema
                 columns_to_store_in_db = [col for col in db_schema_columns if col in df_for_db.columns]
                 df_to_actually_store = df_for_db[columns_to_store_in_db]

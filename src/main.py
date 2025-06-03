@@ -38,6 +38,9 @@ async def fetch_daily_weather_metrics(weather_client: WeatherAPIClient, date_to_
             "houston_temp_c": float(first_row.get('houston_temp_c', np.nan)),
             "austin_temp_c": float(first_row.get('austin_temp_c', np.nan)),
             "dallas_temp_c": float(first_row.get('dallas_temp_c', np.nan)),
+            "san_antonio_temp_c": float(first_row.get('san_antonio_temp_c', np.nan)),
+            "fort_worth_temp_c": float(first_row.get('fort_worth_temp_c', np.nan)),
+            "corpus_christi_temp_c": float(first_row.get('corpus_christi_temp_c', np.nan)),
         }
         # Filter out NaN values if any field failed to convert or was missing
         metrics = {k: v for k, v in metrics.items() if not np.isnan(v)}
@@ -67,7 +70,7 @@ async def fetch_and_store_weather_data(weather_client: WeatherAPIClient, pg_stor
              weather_df.rename(columns={'time': 'timestamp'}, inplace=True)
         
         # Ensure only relevant columns are selected for insertion
-        table_columns = ['timestamp', 'houston_temp_c', 'austin_temp_c', 'dallas_temp_c', 'avg_temperature_c', 'avg_temperature_f']
+        table_columns = ['timestamp', 'houston_temp_c', 'austin_temp_c', 'dallas_temp_c', 'san_antonio_temp_c', 'fort_worth_temp_c', 'corpus_christi_temp_c', 'avg_temperature_c', 'avg_temperature_f']
         df_to_insert = weather_df[[col for col in table_columns if col in weather_df.columns]]
 
         if not df_to_insert.empty:

@@ -76,8 +76,8 @@ class PgVectorStorage:
                 return None
         return self.pg_conn
 
-    def store_embedding(self, vector_id: str, embedding: np.ndarray) -> bool:
-        """Store vector embedding."""
+    def store_embedding(self, vector_id: str, embedding: np.ndarray, semantic_sentence: Optional[str] = None) -> bool:
+        """Store vector embedding with optional semantic sentence."""
         conn = self._get_connection()
         if not conn:
             return False
@@ -90,19 +90,21 @@ class PgVectorStorage:
                     CREATE TABLE IF NOT EXISTS {table} (
                         vector_id TEXT PRIMARY KEY,
                         embedding VECTOR(1536),
+                        semantic_sentence TEXT,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """).format(table=sql.Identifier(self.table_name)))
 
-                # Insert/update embedding
+                # Insert/update embedding with semantic sentence
                 cur.execute(sql.SQL("""
-                    INSERT INTO {table} (vector_id, embedding, updated_at)
-                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    INSERT INTO {table} (vector_id, embedding, semantic_sentence, updated_at)
+                    VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
                     ON CONFLICT (vector_id) DO UPDATE SET
                         embedding = EXCLUDED.embedding,
+                        semantic_sentence = EXCLUDED.semantic_sentence,
                         updated_at = CURRENT_TIMESTAMP;
                 """).format(table=sql.Identifier(self.table_name)), 
-                (vector_id, embedding.tolist()))
+                (vector_id, embedding.tolist(), semantic_sentence))
 
             conn.commit()
             logger.info(f"Stored embedding for {vector_id}")
