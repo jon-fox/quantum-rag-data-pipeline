@@ -60,7 +60,7 @@ class ERCOTQueries:
         date_from = delivery_date_from_override or self.default_delivery_date_from
         date_to = delivery_date_to_override or self.default_delivery_date_to
         
-        endpoint_suffix = "2d_agg_load_summary_houston" 
+        endpoint_suffix = "2d_agg_load_summary" 
         endpoint = f"{self.PUBLIC_REPORTS_BASE}/np3-910-er/{endpoint_suffix}"
         
         sced_timestamp_from = f"{date_from}T00:00:00"
@@ -74,6 +74,92 @@ class ERCOTQueries:
         }
         
         logger.info(f"Fetching aggregated load summary from {date_from} to {date_to}")
+        return self.client.get_data(endpoint, params)
+    
+    def get_aggregated_dsr_loads(
+        self, 
+        region: Optional[str] = None,
+        page: int = 1,
+        size: int = 100,
+        delivery_date_from_override: Optional[str] = None,
+        delivery_date_to_override: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Uses override dates if provided, otherwise instance defaults.
+        
+        Why: Shows demand-side response activity.
+        Use: Suggests ERCOT called for load reduction due to grid stress.
+
+        Args:
+            region (str, optional): Region filter (Houston, North, South, West).
+            page (int): Page number for pagination.
+            size (int): Number of records per page.
+            delivery_date_from_override (str, optional): Specific start date (YYYY-MM-DD).
+            delivery_date_to_override (str, optional): Specific end date (YYYY-MM-DD).
+            
+        Returns:
+            dict: The API response containing dsr loads data.
+        """
+        date_from = delivery_date_from_override or self.default_delivery_date_from
+        date_to = delivery_date_to_override or self.default_delivery_date_to
+        
+        endpoint_suffix = "2d_agg_dsr_loads" 
+        endpoint = f"{self.PUBLIC_REPORTS_BASE}/np3-910-er/{endpoint_suffix}"
+        
+        sced_timestamp_from = f"{date_from}T00:00:00"
+        sced_timestamp_to = f"{date_to}T00:00:00"
+        
+        params = {
+            "SCEDTimestampFrom": sced_timestamp_from,
+            "SCEDTimestampTo": sced_timestamp_to,
+            "page": page,
+            "size": size
+        }
+        
+        logger.info(f"Fetching dsr loads from {date_from} to {date_to}")
+        return self.client.get_data(endpoint, params)
+    
+    def get_aggregated_dsr_loads(
+        self, 
+        region: Optional[str] = None,
+        page: int = 1,
+        size: int = 100,
+        delivery_date_from_override: Optional[str] = None,
+        delivery_date_to_override: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Uses override dates if provided, otherwise instance defaults.
+        
+        Why: Shows demand-side response activity.
+        Use: Suggests ERCOT called for load reduction due to grid stress.
+
+        Args:
+            region (str, optional): Region filter (Houston, North, South, West).
+            page (int): Page number for pagination.
+            size (int): Number of records per page.
+            delivery_date_from_override (str, optional): Specific start date (YYYY-MM-DD).
+            delivery_date_to_override (str, optional): Specific end date (YYYY-MM-DD).
+            
+        Returns:
+            dict: The API response containing dsr loads data.
+        """
+        date_from = delivery_date_from_override or self.default_delivery_date_from
+        date_to = delivery_date_to_override or self.default_delivery_date_to
+        
+        endpoint_suffix = "2d_agg_dsr_loads" 
+        endpoint = f"{self.PUBLIC_REPORTS_BASE}/np3-910-er/{endpoint_suffix}"
+        
+        sced_timestamp_from = f"{date_from}T00:00:00"
+        sced_timestamp_to = f"{date_to}T00:00:00"
+        
+        params = {
+            "SCEDTimestampFrom": sced_timestamp_from,
+            "SCEDTimestampTo": sced_timestamp_to,
+            "page": page,
+            "size": size
+        }
+        
+        logger.info(f"Fetching dsr loads from {date_from} to {date_to}")
         return self.client.get_data(endpoint, params)
     
     def get_agg_gen_summary(
@@ -117,9 +203,50 @@ class ERCOTQueries:
         logger.info(f"Fetching aggregated generation summary from {date_from} to {date_to}")
         return self.client.get_data(endpoint, params)
     
+    def get_agg_output_summary(
+        self, 
+        region: Optional[str] = None,
+        page: int = 1,
+        size: int = 100,
+        delivery_date_from_override: Optional[str] = None,
+        delivery_date_to_override: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Why: Planned vs. actual output indicator.
+        Use: Spot mismatches between scheduled and actual generation.
+
+        Args:
+            region (str, optional): Region filter (Houston, North, South, West).
+            page (int): Page number for pagination.
+            size (int): Number of records per page.
+            delivery_date_from_override (str, optional): Specific start date (YYYY-MM-DD).
+            delivery_date_to_override (str, optional): Specific end date (YYYY-MM-DD).
+            
+        Returns:
+            dict: The API response containing generation summary data.
+        """
+        date_from = delivery_date_from_override or self.default_delivery_date_from
+        date_to = delivery_date_to_override or self.default_delivery_date_to
+
+        endpoint_suffix = "2d_agg_out_sched"
+        endpoint = f"{self.PUBLIC_REPORTS_BASE}/np3-910-er/{endpoint_suffix}" 
+        
+        sced_timestamp_from = f"{date_from}T00:00:00"
+        sced_timestamp_to = f"{date_to}T00:00:00"
+
+        params = {
+            "SCEDTimestampFrom": sced_timestamp_from,
+            "SCEDTimestampTo": sced_timestamp_to,
+            "page": page,
+            "size": size
+        }
+        
+        logger.info(f"Fetching aggregated output schedule from {date_from} to {date_to}")
+        return self.client.get_data(endpoint, params)
+
     def get_ancillary_service_offers(
         self,
-        service_type: str,
+        service_type: str = "ecrss",
         hour_ending_from: Optional[int] = None,
         hour_ending_to: Optional[int] = None,
         page: int = 1,
