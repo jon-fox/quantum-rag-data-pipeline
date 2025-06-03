@@ -55,11 +55,11 @@ This data is then used to:
 ---
 
 **Sample Summary (Statewide ERCOT, May 30–31, 2025):**
-**Total Load & Generation:** On May 30, ERCOT recorded a total system load of **5341 GWh** and generation output of **5387 GWh**, indicating a stable supply-demand balance.
-**Ancillary Services:** Ancillary services under **ECRSS** reached a peak offer of **2.1 GW**, suggesting moderate system flexibility.
-**Demand Side Resources:** **DSR** contributed **104 MW**, reflecting low demand curtailment activity.
-**Forecast Accuracy:** Output schedules closely matched telemetry, with minimal forecast deviation.
-**Weather Conditions:** Weather across major cities averaged **25.3°C (77.5°F)**. Highs were observed in **Austin (27.1°C)** and **San Antonio (26.8°C)**, with cooler conditions in **Dallas (23.3°C)** and **El Paso (24.1°C)**. **Houston** recorded **25.6°C**, aligning with seasonal expectations.
+**Total Load & Generation:** On May 30, ERCOT reported an aggregated system load of **5341 MW** and telemetry generation of **5387 MW**.
+**Ancillary Services:** ECRSS offers totaled **2.1 GW**, with pricing data recorded.
+**Demand Side Resources:** DSR loads contributed **104 MW**. DSR generation values were also reported.
+**Forecast Accuracy:** Output schedules were reported at **5400 MW**, with lower and upper bounds at **5300 MW** and **5500 MW** respectively. Basepoint generation was **5380 MW**, with high and low sustainable limits at **5450 MW** and **5300 MW**.
+**Weather Conditions:** Average temperatures across major Texas cities on May 30 were as follows — **Houston: 25.6°C**, **Austin: 27.1°C**, **San Antonio: 26.8°C**, **Dallas: 23.3°C**, **El Paso: 24.1°C**.
 
 
 <!-- 

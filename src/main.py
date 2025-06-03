@@ -20,40 +20,7 @@ from src.config.constants import LOCATIONS
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# create_semantic_sentence function is now in src.services.sentence_builder.py
-# process_and_embed_daily_summary is now in src.services.sentence_builder.py
-
-async def fetch_ercot_generation_metric(ercot_queries: ERCOTQueries, date_str: str) -> Optional[float]:
-    """Simple function to fetch just the generation metric using fetch_all_ercot_data."""
-    all_ercot_data = await fetch_all_ercot_data(ercot_queries, date_str, date_str)
-    
-    if 'generation_summary' not in all_ercot_data:
-        return None
-    
-    gen_data = all_ercot_data['generation_summary']
-    records = gen_data.get('data', [])
-    fields = gen_data.get('fields', [])
-    
-    if not records or not fields:
-        return None
-    
-    # Find generation field
-    field_mapping = {field['name']: i for i, field in enumerate(fields)}
-    gen_index = field_mapping.get('sumGenTelemMW')
-    
-    if gen_index is None:
-        return None
-    
-    # Sum generation values
-    total = 0.0
-    for record in records:
-        if len(record) > gen_index:
-            try:
-                total += float(record[gen_index])
-            except (ValueError, TypeError):
-                continue
-    
-    return total if total > 0 else None
+ENABLE_ERCOT_LOGGING = False
 
 async def fetch_daily_weather_metrics(weather_client: WeatherAPIClient, date_to_fetch: str) -> Optional[Dict[str, float]]:
     """Fetches and processes weather data to get key daily temperature metrics."""
@@ -112,11 +79,40 @@ async def fetch_and_store_weather_data(weather_client: WeatherAPIClient, pg_stor
     except Exception as e:
         logger.error(f"Error during weather data processing for {date_to_fetch}: {e}", exc_info=True)
 
-async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date_to: str) -> Dict[str, Any]:
-    """Fetches data from all ERCOT endpoints and returns combined results."""
+async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date_to: str, enable_logging: bool = False) -> Dict[str, Any]:
+    """Fetches data from all ERCOT endpoints and extracts relevant metrics."""
     logger.info(f"Fetching all ERCOT data for {date_from} to {date_to}")
     
     all_data = {}
+    
+    def extract_field_values(data_dict: Dict, field_names: list) -> Dict[str, float]:
+        """Extract and sum values for specified fields from ERCOT API response."""
+        records = data_dict.get('data', [])
+        fields = data_dict.get('fields', [])
+        
+        if not records or not fields:
+            return {}
+        
+        # Create field name to index mapping
+        field_mapping = {field['name']: i for i, field in enumerate(fields)}
+        
+        extracted_values = {}
+        for field_name in field_names:
+            if field_name in field_mapping:
+                field_index = field_mapping[field_name]
+                total = 0.0
+                count = 0
+                for record in records:
+                    if len(record) > field_index:
+                        try:
+                            value = float(record[field_index])
+                            total += value
+                            count += 1
+                        except (ValueError, TypeError):
+                            continue
+                extracted_values[field_name] = total if count > 0 else 0.0
+        
+        return extracted_values
     
     try:
         # Generation Summary
@@ -124,41 +120,85 @@ async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date
             delivery_date_from_override=date_from, 
             delivery_date_to_override=date_to
         )
-        all_data['generation_summary'] = gen_data
+        gen_values = extract_field_values(gen_data, ['sumBasePointNonIRR', 'sumHASLNonIRR', 'sumLASLNonIRR'])
+        all_data['generation_summary'] = {
+            'raw_data': gen_data,
+            'metrics': gen_values
+        }
+        if enable_logging:
+            logger.info(f"Generation Summary data structure: {json.dumps(gen_data, indent=2, default=str)[:500]}...")
+            logger.info(f"Generation metrics: {gen_values}")
         
         # Load Summary  
         load_data = ercot_queries.get_aggregated_load_summary(
             delivery_date_from_override=date_from,
             delivery_date_to_override=date_to
         )
-        all_data['load_summary'] = load_data
+        load_values = extract_field_values(load_data, ['aggLoadSummary', 'sumTelemGenMW'])
+        all_data['load_summary'] = {
+            'raw_data': load_data,
+            'metrics': load_values
+        }
+        if enable_logging:
+            logger.info(f"Load Summary data structure: {json.dumps(load_data, indent=2, default=str)[:500]}...")
+            logger.info(f"Load metrics: {load_values}")
         
         # Output Schedule
         output_data = ercot_queries.get_agg_output_summary(
             delivery_date_from_override=date_from,
             delivery_date_to_override=date_to
         )
-        all_data['output_schedule'] = output_data
+        output_values = extract_field_values(output_data, ['sumOutputSched', 'sumLSLOutputSched', 'sumHSLOutputSched'])
+        all_data['output_schedule'] = {
+            'raw_data': output_data,
+            'metrics': output_values
+        }
+        if enable_logging:
+            logger.info(f"Output Schedule data structure: {json.dumps(output_data, indent=2, default=str)[:500]}...")
+            logger.info(f"Output metrics: {output_values}")
         
         # DSR Loads
         dsr_data = ercot_queries.get_aggregated_dsr_loads(
             delivery_date_from_override=date_from,
             delivery_date_to_override=date_to
         )
-        all_data['dsr_loads'] = dsr_data
+        dsr_values = extract_field_values(dsr_data, ['sumTelemDSRLoad', 'sumTelemDSRGen'])
+        all_data['dsr_loads'] = {
+            'raw_data': dsr_data,
+            'metrics': dsr_values
+        }
+        if enable_logging:
+            logger.info(f"DSR Loads data structure: {json.dumps(dsr_data, indent=2, default=str)[:500]}...")
+            logger.info(f"DSR metrics: {dsr_values}")
         
         # Key Ancillary Services
-        # for service in ['regup', 'regdn', 'rrsffr']:
-        for service in [ "ecrss"]:
+        for service in ["ecrss"]:
             try:
                 service_data = ercot_queries.get_ancillary_service_offers(
                     service_type=service,
                     delivery_date_from_override=date_from,
                     delivery_date_to_override=date_to
                 )
-                all_data[f'ancillary_{service}'] = service_data
+                service_values = extract_field_values(service_data, ['MWOffered', 'ECRSSOfferPrice'])
+                all_data[f'ancillary_{service}'] = {
+                    'raw_data': service_data,
+                    'metrics': service_values
+                }
+                if enable_logging:
+                    logger.info(f"Ancillary Service {service} data structure: {json.dumps(service_data, indent=2, default=str)[:500]}...")
+                    logger.info(f"Ancillary {service} metrics: {service_values}")
             except Exception as e:
                 logger.warning(f"Failed to fetch {service} data: {e}")
+        
+        if enable_logging:
+            logger.info(f"Complete ERCOT data summary:")
+            for key, value in all_data.items():
+                if isinstance(value, dict) and 'raw_data' in value:
+                    raw_data = value['raw_data']
+                    record_count = len(raw_data.get('data', []))
+                    field_count = len(raw_data.get('fields', []))
+                    metrics_count = len(value.get('metrics', {}))
+                    logger.info(f"  {key}: {record_count} records, {field_count} fields, {metrics_count} metrics extracted")
                 
         logger.info(f"Successfully fetched {len(all_data)} ERCOT datasets")
         return all_data
@@ -167,9 +207,27 @@ async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date
         logger.error(f"Error fetching ERCOT data: {e}")
         return all_data
 
-async def main_ingestion_pipeline():
-    """Main function to orchestrate the data ingestion pipeline."""
+async def fetch_ercot_metrics_for_embedding(ercot_queries: ERCOTQueries, date_from: str, date_to: str) -> Optional[Dict[str, Any]]:
+    """Wrapper function to fetch ERCOT data for embedding pipeline."""
+    return await fetch_all_ercot_data(ercot_queries, date_from, date_to, enable_logging=False)
+
+async def main_ingestion_pipeline(date_from: Optional[str] = None, date_to: Optional[str] = None):
+    """Main function to orchestrate the data ingestion pipeline.
+    
+    Args:
+        date_from: Start date for ERCOT data fetching (YYYY-MM-DD). Defaults to yesterday.
+        date_to: End date for ERCOT data fetching (YYYY-MM-DD). Defaults to today.
+    """
     logger.info("Initializing data ingestion pipeline...")
+    
+    # Set default dates if not provided
+    today = datetime.today()
+    if date_from is None:
+        date_from = (today - timedelta(days=1)).strftime('%Y-%m-%d')
+    if date_to is None:
+        date_to = today.strftime('%Y-%m-%d')
+        
+    logger.info(f"Using date range: {date_from} to {date_to}")
     
     load_environment()
 
@@ -177,7 +235,7 @@ async def main_ingestion_pipeline():
     days_to_store_raw_weather = int(get_env_var("DAYS_TO_STORE_RAW_WEATHER", "1")) 
 
     ercot_client = ERCOTClient()
-    ercot_queries = ERCOTQueries(client=ercot_client)
+    ercot_queries = ERCOTQueries(client=ercot_client, delivery_date_from=date_from, delivery_date_to=date_to)
     
     weather_client = None
     weather_api_key = get_env_var("WEATHER_API_KEY")
@@ -200,7 +258,6 @@ async def main_ingestion_pipeline():
         logger.warning("OPENAI_API_KEY not found. Embedding tasks will be skipped.")
     
     logger.info("--- Starting Data Ingestion Tasks ---")
-    today = datetime.today()
 
     # Process and Embed Combined Daily Summaries
     logger.info(f"--- Starting Combined Daily Summary Embedding for the last {days_to_process_for_embeddings} day(s) ---")
@@ -214,9 +271,9 @@ async def main_ingestion_pipeline():
                 date_to_end_process=target_date.strftime('%Y-%m-%d'), 
                 ercot_queries=ercot_queries,
                 weather_client=weather_client,
-                pg_storage=pg_vector_storage, 
+                pg_storage=pg_vector_storage,
                 embedding_service=embedding_service,
-                fetch_ercot_metric_func=fetch_ercot_generation_metric, # Pass simple generation metric function
+                fetch_ercot_metric_func=fetch_ercot_metrics_for_embedding, # Pass the wrapper function
                 fetch_weather_metrics_func=fetch_daily_weather_metrics # Pass local function
             )
         )
@@ -249,9 +306,19 @@ async def main_ingestion_pipeline():
     logger.info("Data ingestion pipeline finished.")
 
 if __name__ == "__main__":
+    ENABLE_ERCOT_LOGGING = True
+    
+    if ENABLE_ERCOT_LOGGING:
+        logger.info("ERCOT data structure logging is ENABLED")
+    
+    # Default dates: yesterday to today
+    today = datetime.today()
+    default_date_from = (today - timedelta(days=1)).strftime('%Y-%m-%d')
+    default_date_to = today.strftime('%Y-%m-%d')
+    
     logger.info("Starting main.py script...")
     try:
-        asyncio.run(main_ingestion_pipeline())
+        asyncio.run(main_ingestion_pipeline(default_date_from, default_date_to))
     except KeyboardInterrupt:
         logger.info("Pipeline execution interrupted by user.")
     except Exception as e:
