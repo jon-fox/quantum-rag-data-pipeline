@@ -14,7 +14,7 @@ from src.storage.pgvector_storage import PgVectorStorage
 from src.services.embedding_service import EmbeddingService
 
 from src.services.sentence_builder import process_and_embed_daily_summary 
-from src.config.constants import LOCATIONS # Import LOCATIONS from constants.py
+from src.config.constants import LOCATIONS
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # create_semantic_sentence function is now in src.services.sentence_builder.py
 # process_and_embed_daily_summary is now in src.services.sentence_builder.py
 
-async def fetch_daily_ercot_metric(ercot_queries: ERCOTQueries, date_to_start_fetch: str, date_to_end_fetch: str) -> Optional[float]:
+async def fetch_daily_ercot_metrics(ercot_queries: ERCOTQueries, date_to_start_fetch: str, date_to_end_fetch: str) -> Optional[float]:
     """Fetches and processes ERCOT data to get a single daily generation metric."""
     logger.info(f"Starting fetch_daily_ercot_metric for date: {date_to_start_fetch} to {date_to_end_fetch}")
     
@@ -198,7 +198,7 @@ async def main_ingestion_pipeline():
                 weather_client=weather_client,
                 pg_storage=pg_vector_storage, 
                 embedding_service=embedding_service,
-                fetch_ercot_metric_func=fetch_daily_ercot_metric, # Pass local function
+                fetch_ercot_metric_func=fetch_daily_ercot_metrics, # Pass local function
                 fetch_weather_metrics_func=fetch_daily_weather_metrics # Pass local function
             )
         )
