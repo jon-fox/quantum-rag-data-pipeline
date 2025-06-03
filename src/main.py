@@ -148,7 +148,8 @@ async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date
         all_data['dsr_loads'] = dsr_data
         
         # Key Ancillary Services
-        for service in ['regup', 'regdn', 'rrsffr']:
+        # for service in ['regup', 'regdn', 'rrsffr']:
+        for service in [ "ecrss"]:
             try:
                 service_data = ercot_queries.get_ancillary_service_offers(
                     service_type=service,
