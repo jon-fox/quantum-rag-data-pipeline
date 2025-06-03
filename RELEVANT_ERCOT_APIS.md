@@ -55,12 +55,26 @@ This data is then used to:
 ---
 
 **Sample Summary (Statewide ERCOT, May 30–31, 2025):**
-On May 30, ERCOT recorded a total system load of **5341 GWh** and generation output of **5387 GWh**, indicating a stable supply-demand balance.
-Ancillary services under ECRSS reached a peak offer of **2.1 GW**, suggesting moderate system flexibility.
-DSR (Demand Side Resources) contributed **104 MW**, reflecting low demand curtailment activity.
-Output schedules closely matched telemetry, with minimal forecast deviation.
-Weather across major cities averaged **25.3°C (77.5°F)**, with the highest temperature observed in Austin (**27.1°C**) and the lowest in Dallas (**23.3°C**).
-No major weather anomalies were recorded, supporting typical late spring demand trends.
+**Total Load & Generation:** On May 30, ERCOT recorded a total system load of **5341 GWh** and generation output of **5387 GWh**, indicating a stable supply-demand balance.
+**Ancillary Services:** Ancillary services under **ECRSS** reached a peak offer of **2.1 GW**, suggesting moderate system flexibility.
+**Demand Side Resources:** **DSR** contributed **104 MW**, reflecting low demand curtailment activity.
+**Forecast Accuracy:** Output schedules closely matched telemetry, with minimal forecast deviation.
+**Weather Conditions:** Weather across major cities averaged **25.3°C (77.5°F)**. Highs were observed in **Austin (27.1°C)** and **San Antonio (26.8°C)**, with cooler conditions in **Dallas (23.3°C)** and **El Paso (24.1°C)**. **Houston** recorded **25.6°C**, aligning with seasonal expectations.
+
+
+**Sample Summary (Statewide ERCOT, May 30–31, 2025):**
+**Total Load & Generation:** On May 30, ERCOT recorded a total system load of **5341 GWh** and generation output of **5387 GWh**, indicating a stable supply-demand balance.
+**Ancillary Services:** Ancillary services under **ECRSS** reached a peak offer of **2.1 GW**, suggesting moderate system flexibility.
+**Demand Side Resources:** **DSR** contributed **104 MW**, reflecting low demand curtailment activity.
+**Forecast Accuracy:** Output schedules closely matched telemetry, with minimal forecast deviation.
+**Weather Conditions:** Weather across major cities averaged **25.3°C (77.5°F)**. Highs were observed in **Austin (27.1°C)** and **San Antonio (26.8°C)**, with cooler conditions in **Dallas (23.3°C)** and **El Paso (24.1°C)**. **Houston** recorded **25.6°C**, aligning with seasonal expectations.
+
+
+<!-- 
+May include later
+**Weather Impact:** No major weather anomalies were recorded, supporting typical late spring demand trends. 
+-->
+
 
 ---
 
