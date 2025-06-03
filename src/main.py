@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime, timedelta
 import json
 import numpy as np
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 
 from src.config.env_manager import load_environment, get_env_var
@@ -23,74 +23,37 @@ logger = logging.getLogger(__name__)
 # create_semantic_sentence function is now in src.services.sentence_builder.py
 # process_and_embed_daily_summary is now in src.services.sentence_builder.py
 
-async def fetch_daily_ercot_metrics(ercot_queries: ERCOTQueries, date_to_start_fetch: str, date_to_end_fetch: str) -> Optional[float]:
-    """Fetches and processes ERCOT data to get a single daily generation metric."""
-    logger.info(f"Starting fetch_daily_ercot_metric for date: {date_to_start_fetch} to {date_to_end_fetch}")
+async def fetch_ercot_generation_metric(ercot_queries: ERCOTQueries, date_str: str) -> Optional[float]:
+    """Simple function to fetch just the generation metric using fetch_all_ercot_data."""
+    all_ercot_data = await fetch_all_ercot_data(ercot_queries, date_str, date_str)
     
-    try:
-        logger.info(f"Calling ercot_queries.get_agg_gen_summary with date range: {date_to_start_fetch} to {date_to_end_fetch}")
-        gen_summary_response = ercot_queries.get_agg_gen_summary(
-            delivery_date_from_override=date_to_start_fetch, 
-            delivery_date_to_override=date_to_end_fetch
-        )
-        
-        logger.info(f"API response received. Type: {type(gen_summary_response)}")
-        if isinstance(gen_summary_response, dict):
-            logger.info(f"Response keys: {list(gen_summary_response.keys())}")
-        
-
-        # Extract data and field mappings
-        records = gen_summary_response.get('data', [])
-        fields = gen_summary_response.get('fields', [])
-        
-        logger.info(f"Found {len(records)} records in response data")
-        
-        if not records:
-            logger.warning(f"No ERCOT generation records found for {date_to_start_fetch} to {date_to_end_fetch}")
-            return None
-        
-        # Create field name to index mapping from the fields metadata
-        field_mapping = {}
-        for i, field in enumerate(fields):
-            field_mapping[field['name']] = i
-        
-        logger.info(f"Available fields: {list(field_mapping.keys())}")
-        
-        # Look for generation field - "sumGenTelemMW" is the total generation field
-        generation_field_index = field_mapping.get('sumGenTelemMW')
-        if generation_field_index is None:
-            logger.error(f"Could not find 'sumGenTelemMW' field in ERCOT data. Available fields: {list(field_mapping.keys())}")
-            return None
-        
-        logger.info(f"Found generation field 'sumGenTelemMW' at index {generation_field_index}")
-        
-        # Sum all generation values across time intervals
-        total_generation_for_day = 0.0
-        valid_records = 0
-        
-        for idx, record in enumerate(records):
-            if len(record) > generation_field_index:
-                try:
-                    generation_value = float(record[generation_field_index])
-                    total_generation_for_day += generation_value
-                    valid_records += 1
-                    logger.debug(f"Record {idx + 1}: Added {generation_value} MW to total")
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Record {idx + 1}: Could not convert generation value '{record[generation_field_index]}' to float. Error: {e}")
-            else:
-                logger.warning(f"Record {idx + 1}: Not enough fields ({len(record)} vs expected {generation_field_index + 1})")
-        
-        if valid_records == 0:
-            logger.error(f"No valid generation records found for {date_to_start_fetch} to {date_to_end_fetch}")
-            return None
-
-        logger.info(f"Successfully processed ERCOT generation metric for {date_to_start_fetch} to {date_to_end_fetch}: {total_generation_for_day} MW from {valid_records} records")
-        return float(total_generation_for_day)
-
-    except Exception as e:
-        logger.error(f"Exception in fetch_daily_ercot_metric for {date_to_start_fetch} to {date_to_end_fetch}: {type(e).__name__}: {e}")
-        logger.error(f"Exception details:", exc_info=True)
+    if 'generation_summary' not in all_ercot_data:
         return None
+    
+    gen_data = all_ercot_data['generation_summary']
+    records = gen_data.get('data', [])
+    fields = gen_data.get('fields', [])
+    
+    if not records or not fields:
+        return None
+    
+    # Find generation field
+    field_mapping = {field['name']: i for i, field in enumerate(fields)}
+    gen_index = field_mapping.get('sumGenTelemMW')
+    
+    if gen_index is None:
+        return None
+    
+    # Sum generation values
+    total = 0.0
+    for record in records:
+        if len(record) > gen_index:
+            try:
+                total += float(record[gen_index])
+            except (ValueError, TypeError):
+                continue
+    
+    return total if total > 0 else None
 
 async def fetch_daily_weather_metrics(weather_client: WeatherAPIClient, date_to_fetch: str) -> Optional[Dict[str, float]]:
     """Fetches and processes weather data to get key daily temperature metrics."""
@@ -149,6 +112,60 @@ async def fetch_and_store_weather_data(weather_client: WeatherAPIClient, pg_stor
     except Exception as e:
         logger.error(f"Error during weather data processing for {date_to_fetch}: {e}", exc_info=True)
 
+async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date_to: str) -> Dict[str, Any]:
+    """Fetches data from all ERCOT endpoints and returns combined results."""
+    logger.info(f"Fetching all ERCOT data for {date_from} to {date_to}")
+    
+    all_data = {}
+    
+    try:
+        # Generation Summary
+        gen_data = ercot_queries.get_agg_gen_summary(
+            delivery_date_from_override=date_from, 
+            delivery_date_to_override=date_to
+        )
+        all_data['generation_summary'] = gen_data
+        
+        # Load Summary  
+        load_data = ercot_queries.get_aggregated_load_summary(
+            delivery_date_from_override=date_from,
+            delivery_date_to_override=date_to
+        )
+        all_data['load_summary'] = load_data
+        
+        # Output Schedule
+        output_data = ercot_queries.get_agg_output_summary(
+            delivery_date_from_override=date_from,
+            delivery_date_to_override=date_to
+        )
+        all_data['output_schedule'] = output_data
+        
+        # DSR Loads
+        dsr_data = ercot_queries.get_aggregated_dsr_loads(
+            delivery_date_from_override=date_from,
+            delivery_date_to_override=date_to
+        )
+        all_data['dsr_loads'] = dsr_data
+        
+        # Key Ancillary Services
+        for service in ['regup', 'regdn', 'rrsffr']:
+            try:
+                service_data = ercot_queries.get_ancillary_service_offers(
+                    service_type=service,
+                    delivery_date_from_override=date_from,
+                    delivery_date_to_override=date_to
+                )
+                all_data[f'ancillary_{service}'] = service_data
+            except Exception as e:
+                logger.warning(f"Failed to fetch {service} data: {e}")
+                
+        logger.info(f"Successfully fetched {len(all_data)} ERCOT datasets")
+        return all_data
+        
+    except Exception as e:
+        logger.error(f"Error fetching ERCOT data: {e}")
+        return all_data
+
 async def main_ingestion_pipeline():
     """Main function to orchestrate the data ingestion pipeline."""
     logger.info("Initializing data ingestion pipeline...")
@@ -198,7 +215,7 @@ async def main_ingestion_pipeline():
                 weather_client=weather_client,
                 pg_storage=pg_vector_storage, 
                 embedding_service=embedding_service,
-                fetch_ercot_metric_func=fetch_daily_ercot_metrics, # Pass local function
+                fetch_ercot_metric_func=fetch_ercot_generation_metric, # Pass simple generation metric function
                 fetch_weather_metrics_func=fetch_daily_weather_metrics # Pass local function
             )
         )
