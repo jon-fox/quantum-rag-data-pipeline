@@ -32,48 +32,48 @@ def create_semantic_sentence(
         
         sentence_parts = []
         
-        # Total Load & Generation section
+        # Total Load & Generation section - now using daily averages
         if load_metrics and gen_metrics:
-            agg_load = load_metrics.get('aggLoadSummary', 0) / 1000  # Convert to GW
-            telem_gen = load_metrics.get('sumTelemGenMW', 0) / 1000  # Convert to GW
-            sentence_parts.append(f"ERCOT reported an aggregated system load of {agg_load:.1f} GW and telemetry generation of {telem_gen:.1f} GW")
+            agg_load = load_metrics.get('aggLoadSummary', 0)  # Already in MW, daily average
+            telem_gen = load_metrics.get('sumTelemGenMW', 0)  # Already in MW, daily average
+            sentence_parts.append(f"ERCOT reported a daily average aggregated system load of {agg_load:.0f} MW and telemetry generation of {telem_gen:.0f} MW")
         
-        # Ancillary Services section
+        # Ancillary Services section - now using maximum values
         if ancillary_metrics:
-            mw_offered = ancillary_metrics.get('MWOffered', 0) / 1000  # Convert to GW
+            mw_offered = ancillary_metrics.get('MWOffered', 0)  # Already in MW, maximum value
             if mw_offered > 0:
-                sentence_parts.append(f"ECRSS offers totaled {mw_offered:.1f} GW with pricing data recorded")
+                sentence_parts.append(f"ECRSS offers peaked at {mw_offered:.0f} MW with pricing data recorded")
         
-        # Demand Side Resources section
+        # Demand Side Resources section - now using daily averages
         if dsr_metrics:
-            dsr_load = dsr_metrics.get('sumTelemDSRLoad', 0)
-            dsr_gen = dsr_metrics.get('sumTelemDSRGen', 0)
+            dsr_load = dsr_metrics.get('sumTelemDSRLoad', 0)  # Already in MW, daily average
+            dsr_gen = dsr_metrics.get('sumTelemDSRGen', 0)  # Already in MW, daily average
             dsr_parts = []
             if dsr_load > 0:
-                dsr_parts.append(f"DSR loads contributed {dsr_load:.0f} MW")
+                dsr_parts.append(f"DSR loads averaged {dsr_load:.0f} MW")
             if dsr_gen > 0:
-                dsr_parts.append(f"DSR generation values were {dsr_gen:.0f} MW")
+                dsr_parts.append(f"DSR generation averaged {dsr_gen:.0f} MW")
             if dsr_parts:
                 sentence_parts.append(", ".join(dsr_parts))
         
-        # Forecast Accuracy section
+        # Forecast Accuracy section - now using daily averages
         if output_metrics and gen_metrics:
-            output_sched = output_metrics.get('sumOutputSched', 0)
-            lsl_output = output_metrics.get('sumLSLOutputSched', 0)
-            hsl_output = output_metrics.get('sumHSLOutputSched', 0)
-            base_point = gen_metrics.get('sumBasePointNonIRR', 0)
-            hasl = gen_metrics.get('sumHASLNonIRR', 0)
-            lasl = gen_metrics.get('sumLASLNonIRR', 0)
+            output_sched = output_metrics.get('sumOutputSched', 0)  # Already in MW, daily average
+            lsl_output = output_metrics.get('sumLSLOutputSched', 0)  # Already in MW, daily average
+            hsl_output = output_metrics.get('sumHSLOutputSched', 0)  # Already in MW, daily average
+            base_point = gen_metrics.get('sumBasePointNonIRR', 0)  # Already in MW, daily average
+            hasl = gen_metrics.get('sumHASLNonIRR', 0)  # Already in MW, daily average
+            lasl = gen_metrics.get('sumLASLNonIRR', 0)  # Already in MW, daily average
             
             forecast_parts = []
             if output_sched > 0:
-                forecast_parts.append(f"Output schedules were reported at {output_sched:.0f} MW")
+                forecast_parts.append(f"Output schedules averaged {output_sched:.0f} MW")
             if lsl_output > 0 and hsl_output > 0:
-                forecast_parts.append(f"with lower and upper bounds at {lsl_output:.0f} MW and {hsl_output:.0f} MW respectively")
+                forecast_parts.append(f"with average lower and upper bounds at {lsl_output:.0f} MW and {hsl_output:.0f} MW respectively")
             if base_point > 0:
-                forecast_parts.append(f"Basepoint generation was {base_point:.0f} MW")
+                forecast_parts.append(f"Basepoint generation averaged {base_point:.0f} MW")
             if hasl > 0 and lasl > 0:
-                forecast_parts.append(f"with high and low sustainable limits at {hasl:.0f} MW and {lasl:.0f} MW")
+                forecast_parts.append(f"with average high and low sustainable limits at {hasl:.0f} MW and {lasl:.0f} MW")
             
             if forecast_parts:
                 sentence_parts.append(", ".join(forecast_parts))
@@ -102,7 +102,7 @@ def create_semantic_sentence(
 
         weather_part = (
             f"On {date_str}, the average temperature across Texas was {avg_temp_str}. "
-            f"Average temperatures across major Texas cities were as follows — "
+            f"Average temperatures across major Texas cities on the ERCOT grid were as follows — "
             f"Houston: {houston_temp_str}, Austin: {austin_temp_str}, "
             f"Dallas: {dallas_temp_str}, San Antonio: {san_antonio_temp_str}, "
             f"Fort Worth: {fort_worth_temp_str}, Corpus Christi: {corpus_christi_temp_str}."

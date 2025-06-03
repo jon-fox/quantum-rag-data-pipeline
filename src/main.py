@@ -88,8 +88,14 @@ async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date
     
     all_data = {}
     
-    def extract_field_values(data_dict: Dict, field_names: list) -> Dict[str, float]:
-        """Extract and sum values for specified fields from ERCOT API response."""
+    def extract_field_values(data_dict: Dict, field_configs: list) -> Dict[str, float]:
+        """Extract values for specified fields from ERCOT API response with configurable aggregation.
+        
+        Args:
+            data_dict: ERCOT API response dictionary
+            field_configs: List of tuples (field_name, aggregation_method) where 
+                          aggregation_method is 'average', 'max', or 'sum'
+        """
         records = data_dict.get('data', [])
         fields = data_dict.get('fields', [])
         
@@ -100,30 +106,43 @@ async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date
         field_mapping = {field['name']: i for i, field in enumerate(fields)}
         
         extracted_values = {}
-        for field_name in field_names:
+        for field_name, aggregation_method in field_configs:
             if field_name in field_mapping:
                 field_index = field_mapping[field_name]
-                total = 0.0
-                count = 0
+                values = []
                 for record in records:
                     if len(record) > field_index:
                         try:
                             value = float(record[field_index])
-                            total += value
-                            count += 1
+                            values.append(value)
                         except (ValueError, TypeError):
                             continue
-                extracted_values[field_name] = total if count > 0 else 0.0
+                
+                if values:
+                    if aggregation_method == 'average':
+                        extracted_values[field_name] = sum(values) / len(values)
+                    elif aggregation_method == 'max':
+                        extracted_values[field_name] = max(values)
+                    elif aggregation_method == 'sum':
+                        extracted_values[field_name] = sum(values)
+                    else:
+                        extracted_values[field_name] = sum(values)  # Default to sum
+                else:
+                    extracted_values[field_name] = 0.0
         
         return extracted_values
     
     try:
-        # Generation Summary
+        # Generation Summary - use averages for basepoint and sustainable limits
         gen_data = ercot_queries.get_agg_gen_summary(
             delivery_date_from_override=date_from, 
             delivery_date_to_override=date_to
         )
-        gen_values = extract_field_values(gen_data, ['sumBasePointNonIRR', 'sumHASLNonIRR', 'sumLASLNonIRR'])
+        gen_values = extract_field_values(gen_data, [
+            ('sumBasePointNonIRR', 'average'),
+            ('sumHASLNonIRR', 'average'),
+            ('sumLASLNonIRR', 'average')
+        ])
         all_data['generation_summary'] = {
             'raw_data': gen_data,
             'metrics': gen_values
@@ -132,12 +151,15 @@ async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date
             logger.info(f"Generation Summary data structure: {json.dumps(gen_data, indent=2, default=str)[:500]}...")
             logger.info(f"Generation metrics: {gen_values}")
         
-        # Load Summary  
+        # Load Summary - use averages for load and telemetry generation
         load_data = ercot_queries.get_aggregated_load_summary(
             delivery_date_from_override=date_from,
             delivery_date_to_override=date_to
         )
-        load_values = extract_field_values(load_data, ['aggLoadSummary', 'sumTelemGenMW'])
+        load_values = extract_field_values(load_data, [
+            ('aggLoadSummary', 'average'),
+            ('sumTelemGenMW', 'average')
+        ])
         all_data['load_summary'] = {
             'raw_data': load_data,
             'metrics': load_values
@@ -146,12 +168,16 @@ async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date
             logger.info(f"Load Summary data structure: {json.dumps(load_data, indent=2, default=str)[:500]}...")
             logger.info(f"Load metrics: {load_values}")
         
-        # Output Schedule
+        # Output Schedule - use averages for all output schedule metrics
         output_data = ercot_queries.get_agg_output_summary(
             delivery_date_from_override=date_from,
             delivery_date_to_override=date_to
         )
-        output_values = extract_field_values(output_data, ['sumOutputSched', 'sumLSLOutputSched', 'sumHSLOutputSched'])
+        output_values = extract_field_values(output_data, [
+            ('sumOutputSched', 'average'),
+            ('sumLSLOutputSched', 'average'),
+            ('sumHSLOutputSched', 'average')
+        ])
         all_data['output_schedule'] = {
             'raw_data': output_data,
             'metrics': output_values
@@ -160,12 +186,15 @@ async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date
             logger.info(f"Output Schedule data structure: {json.dumps(output_data, indent=2, default=str)[:500]}...")
             logger.info(f"Output metrics: {output_values}")
         
-        # DSR Loads
+        # DSR Loads - use averages for DSR load and generation
         dsr_data = ercot_queries.get_aggregated_dsr_loads(
             delivery_date_from_override=date_from,
             delivery_date_to_override=date_to
         )
-        dsr_values = extract_field_values(dsr_data, ['sumTelemDSRLoad', 'sumTelemDSRGen'])
+        dsr_values = extract_field_values(dsr_data, [
+            ('sumTelemDSRLoad', 'average'),
+            ('sumTelemDSRGen', 'average')
+        ])
         all_data['dsr_loads'] = {
             'raw_data': dsr_data,
             'metrics': dsr_values
@@ -182,7 +211,11 @@ async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date
                     delivery_date_from_override=date_from,
                     delivery_date_to_override=date_to
                 )
-                service_values = extract_field_values(service_data, ['MWOffered', 'ECRSSOfferPrice'])
+                # ECRSS - use maximum for MWOffered, average for price
+                service_values = extract_field_values(service_data, [
+                    ('MWOffered', 'max'),
+                    ('ECRSSOfferPrice', 'average')
+                ])
                 all_data[f'ancillary_{service}'] = {
                     'raw_data': service_data,
                     'metrics': service_values
