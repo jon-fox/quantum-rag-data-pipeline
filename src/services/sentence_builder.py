@@ -11,14 +11,15 @@ from src.services.embedding_service import EmbeddingService
 logger = logging.getLogger(__name__)
 
 def create_semantic_sentence(
-    date_str: str,
+    date_from: str,
+    date_to: str,
     ercot_metrics: Optional[Dict[str, Any]],
     weather_metrics: Optional[Dict[str, float]]
 ) -> Optional[str]:
     """Constructs a semantic sentence from ERCOT and weather data for a given date."""
 
     if ercot_metrics is None and weather_metrics is None:
-        logger.warning(f"Missing both ERCOT and weather data for {date_str}, cannot create semantic sentence.")
+        logger.warning(f"Missing both ERCOT and weather data for {date_from} to {date_to}, cannot create semantic sentence.")
         return None
     
     ercot_part = ""
@@ -81,7 +82,7 @@ def create_semantic_sentence(
         if sentence_parts:
             ercot_part = ". ".join(sentence_parts) + "."
     else:
-        logger.warning(f"Missing ERCOT data for {date_str}. Sentence will not include ERCOT data.")
+        logger.warning(f"Missing ERCOT data for {date_from} to {date_to}. Sentence will not include ERCOT data.")
 
     weather_part = ""
     if weather_metrics:
@@ -101,20 +102,20 @@ def create_semantic_sentence(
         corpus_christi_temp_str = format_temp(weather_metrics.get('corpus_christi_temp_c'))
 
         weather_part = (
-            f"On {date_str}, the average temperature across Texas was {avg_temp_str}. "
+            f"On {date_from}, the average temperature across Texas was {avg_temp_str}. "
             f"Average temperatures across major Texas cities on the ERCOT grid were as follows — "
             f"Houston: {houston_temp_str}, Austin: {austin_temp_str}, "
             f"Dallas: {dallas_temp_str}, San Antonio: {san_antonio_temp_str}, "
             f"Fort Worth: {fort_worth_temp_str}, Corpus Christi: {corpus_christi_temp_str}."
         )
     else:
-        logger.warning(f"Missing weather data for {date_str}. Sentence will not include weather data.")
+        logger.warning(f"Missing weather data for {date_from} to {date_to}. Sentence will not include weather data.")
 
     if not ercot_part and not weather_part:
-        logger.error(f"Both ERCOT and weather parts are empty for {date_str} despite earlier checks. Cannot create sentence.")
+        logger.error(f"Both ERCOT and weather parts are empty for {date_from} to {date_to} despite earlier checks. Cannot create sentence.")
         return None
         
-    sentence_parts = [f"On {date_str},"]
+    sentence_parts = [f"Between {date_from} to {date_to},"]
     if ercot_part:
         sentence_parts.append(ercot_part)
     if weather_part:
@@ -150,7 +151,7 @@ async def process_and_embed_daily_summary(
     if weather_client and weather_metrics is None:
         logger.warning(f"Could not retrieve Weather metrics for {date_to_start_process} to {date_to_end_process} (weather client was available).")
 
-    semantic_sentence = create_semantic_sentence(date_to_start_process, ercot_metrics, weather_metrics)
+    semantic_sentence = create_semantic_sentence(date_to_start_process, date_to_end_process, ercot_metrics, weather_metrics)
 
     if not semantic_sentence:
         logger.warning(f"Semantic sentence could not be created for {date_to_start_process} to {date_to_end_process}. Skipping embedding.")
