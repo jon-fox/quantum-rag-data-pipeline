@@ -38,6 +38,18 @@ def create_semantic_sentence(
             agg_load = load_metrics.get('aggLoadSummary', 0)  # Already in MW, daily average
             telem_gen = load_metrics.get('sumTelemGenMW', 0)  # Already in MW, daily average
             sentence_parts.append(f"ERCOT reported a daily average aggregated system load of {agg_load:.0f} MW and telemetry generation of {telem_gen:.0f} MW")
+            
+            # Renewable energy section
+            wind_sum = gen_metrics.get('sumBasePointWGR', 0)  # Sum across all intervals
+            solar_sum = gen_metrics.get('sumBasePointPVGR', 0)  # Sum across all intervals
+            wind_avg = wind_sum / 96  # Convert to daily average
+            solar_avg = solar_sum / 96  # Convert to daily average
+            remres_avg = gen_metrics.get('sumBasePointREMRES', 0) / 96
+            renew_avg = wind_avg + solar_avg + remres_avg
+            share_pct = (renew_avg / telem_gen) * 100 if telem_gen else 0
+            
+            if renew_avg > 0:
+                sentence_parts.append(f"Renewables supplied an average of {renew_avg:.0f} MW (wind {wind_avg:.0f} MW, solar {solar_avg:.0f} MW, other {remres_avg:.0f} MW), covering {share_pct:.0f}% of total generation")
         
         # Ancillary Services section - now using maximum values
         if ancillary_metrics:
@@ -68,13 +80,11 @@ def create_semantic_sentence(
             
             forecast_parts = []
             if output_sched > 0:
-                forecast_parts.append(f"Output schedules averaged {output_sched:.0f} MW")
-            if lsl_output > 0 and hsl_output > 0:
-                forecast_parts.append(f"with average lower and upper bounds at {lsl_output:.0f} MW and {hsl_output:.0f} MW respectively")
+                forecast_parts.append(f"SCED-dispatchable schedule averaged {output_sched:.0f} MW (headroom: LSL {lsl_output:.0f} MW, HSL {hsl_output:.0f} MW)")
             if base_point > 0:
-                forecast_parts.append(f"Basepoint generation averaged {base_point:.0f} MW")
+                forecast_parts.append(f"Base-point for non-intermittent resources averaged {base_point:.0f} MW")
             if hasl > 0 and lasl > 0:
-                forecast_parts.append(f"with average high and low sustainable limits at {hasl:.0f} MW and {lasl:.0f} MW")
+                forecast_parts.append(f"with sustainable high and low limits of {hasl:.0f} MW and {lasl:.0f} MW")
             
             if forecast_parts:
                 sentence_parts.append(", ".join(forecast_parts))
@@ -115,7 +125,7 @@ def create_semantic_sentence(
         logger.error(f"Both ERCOT and weather parts are empty for {date_from} to {date_to} despite earlier checks. Cannot create sentence.")
         return None
         
-    sentence_parts = [f"Between {date_from} to {date_to},"]
+    sentence_parts = [f"Between {date_from} and {date_to},"]
     if ercot_part:
         sentence_parts.append(ercot_part)
     if weather_part:

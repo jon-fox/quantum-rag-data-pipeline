@@ -141,7 +141,10 @@ async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date
         gen_values = extract_field_values(gen_data, [
             ('sumBasePointNonIRR', 'average'),
             ('sumHASLNonIRR', 'average'),
-            ('sumLASLNonIRR', 'average')
+            ('sumLASLNonIRR', 'average'),
+            ('sumBasePointWGR', 'sum'),
+            ('sumBasePointPVGR', 'sum'),
+            ('sumBasePointREMRES', 'sum')
         ])
         all_data['generation_summary'] = {
             'raw_data': gen_data,
@@ -173,6 +176,7 @@ async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date
             delivery_date_from_override=date_from,
             delivery_date_to_override=date_to
         )
+        
         output_values = extract_field_values(output_data, [
             ('sumOutputSched', 'average'),
             ('sumLSLOutputSched', 'average'),
@@ -191,6 +195,7 @@ async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date
             delivery_date_from_override=date_from,
             delivery_date_to_override=date_to
         )
+
         dsr_values = extract_field_values(dsr_data, [
             ('sumTelemDSRLoad', 'average'),
             ('sumTelemDSRGen', 'average')
