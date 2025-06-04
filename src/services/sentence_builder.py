@@ -16,122 +16,84 @@ def create_semantic_sentence(
     ercot_metrics: Optional[Dict[str, Any]],
     weather_metrics: Optional[Dict[str, float]]
 ) -> Optional[str]:
-    """Constructs a semantic sentence from ERCOT and weather data for a given date."""
+    """Constructs a structured data format from ERCOT and weather data for a given date."""
 
     if ercot_metrics is None and weather_metrics is None:
         logger.warning(f"Missing both ERCOT and weather data for {date_from} to {date_to}, cannot create semantic sentence.")
         return None
     
-    ercot_part = ""
-    if ercot_metrics:
-        # Extract all metrics for comprehensive sentence
-        gen_metrics = ercot_metrics.get('generation_summary', {}).get('metrics', {})
-        load_metrics = ercot_metrics.get('load_summary', {}).get('metrics', {})
-        output_metrics = ercot_metrics.get('output_schedule', {}).get('metrics', {})
-        dsr_metrics = ercot_metrics.get('dsr_loads', {}).get('metrics', {})
-        ancillary_metrics = ercot_metrics.get('ancillary_ecrss', {}).get('metrics', {})
-        
-        sentence_parts = []
-        
-        # Total Load & Generation section - now using daily averages
-        if load_metrics and gen_metrics:
-            agg_load = load_metrics.get('aggLoadSummary', 0)  # Already in MW, daily average
-            telem_gen = load_metrics.get('sumTelemGenMW', 0)  # Already in MW, daily average
-            sentence_parts.append(f"ERCOT reported a daily average aggregated system load of {agg_load:.0f} MW and telemetry generation of {telem_gen:.0f} MW")
-            
-            # Renewable energy section
-            wind_sum = gen_metrics.get('sumBasePointWGR', 0)  # Sum across all intervals
-            solar_sum = gen_metrics.get('sumBasePointPVGR', 0)  # Sum across all intervals
-            wind_avg = wind_sum / 96  # Convert to daily average
-            solar_avg = solar_sum / 96  # Convert to daily average
-            remres_avg = gen_metrics.get('sumBasePointREMRES', 0) / 96
-            renew_avg = wind_avg + solar_avg + remres_avg
-            share_pct = (renew_avg / telem_gen) * 100 if telem_gen else 0
-            
-            if renew_avg > 0:
-                sentence_parts.append(f"Renewables supplied an average of {renew_avg:.0f} MW (wind {wind_avg:.0f} MW, solar {solar_avg:.0f} MW, other {remres_avg:.0f} MW), covering {share_pct:.0f}% of total generation")
-        
-        # Ancillary Services section - now using maximum values
-        if ancillary_metrics:
-            mw_offered = ancillary_metrics.get('MWOffered', 0)  # Already in MW, maximum value
-            if mw_offered > 0:
-                sentence_parts.append(f"ECRSS offers peaked at {mw_offered:.0f} MW with pricing data recorded")
-        
-        # Demand Side Resources section - now using daily averages
-        if dsr_metrics:
-            dsr_load = dsr_metrics.get('sumTelemDSRLoad', 0)  # Already in MW, daily average
-            dsr_gen = dsr_metrics.get('sumTelemDSRGen', 0)  # Already in MW, daily average
-            dsr_parts = []
-            if dsr_load > 0:
-                dsr_parts.append(f"DSR loads averaged {dsr_load:.0f} MW")
-            if dsr_gen > 0:
-                dsr_parts.append(f"DSR generation averaged {dsr_gen:.0f} MW")
-            if dsr_parts:
-                sentence_parts.append(", ".join(dsr_parts))
-        
-        # Forecast Accuracy section - now using daily averages
-        if output_metrics and gen_metrics:
-            output_sched = output_metrics.get('sumOutputSched', 0)  # Already in MW, daily average
-            lsl_output = output_metrics.get('sumLSLOutputSched', 0)  # Already in MW, daily average
-            hsl_output = output_metrics.get('sumHSLOutputSched', 0)  # Already in MW, daily average
-            base_point = gen_metrics.get('sumBasePointNonIRR', 0)  # Already in MW, daily average
-            hasl = gen_metrics.get('sumHASLNonIRR', 0)  # Already in MW, daily average
-            lasl = gen_metrics.get('sumLASLNonIRR', 0)  # Already in MW, daily average
-            
-            forecast_parts = []
-            if output_sched > 0:
-                forecast_parts.append(f"SCED-dispatchable schedule averaged {output_sched:.0f} MW (headroom: LSL {lsl_output:.0f} MW, HSL {hsl_output:.0f} MW)")
-            if base_point > 0:
-                forecast_parts.append(f"Base-point for non-intermittent resources averaged {base_point:.0f} MW")
-            if hasl > 0 and lasl > 0:
-                forecast_parts.append(f"with sustainable high and low limits of {hasl:.0f} MW and {lasl:.0f} MW")
-            
-            if forecast_parts:
-                sentence_parts.append(", ".join(forecast_parts))
-        
-        if sentence_parts:
-            ercot_part = ". ".join(sentence_parts) + "."
-    else:
-        logger.warning(f"Missing ERCOT data for {date_from} to {date_to}. Sentence will not include ERCOT data.")
-
-    weather_part = ""
-    if weather_metrics:
-        # Ensure all expected keys are present, provide defaults if not critical, or handle missing ones.
-        # The format_temp helper handles None by returning "N/A".
-        def format_temp(temp_value):
-            if isinstance(temp_value, (int, float)) and not (isinstance(temp_value, float) and np.isnan(temp_value)):
-                return f"{temp_value:.1f}°C"
-            return "N/A"
-
-        avg_temp_str = format_temp(weather_metrics.get('avg_temp_c'))
-        houston_temp_str = format_temp(weather_metrics.get('houston_temp_c'))
-        austin_temp_str = format_temp(weather_metrics.get('austin_temp_c'))
-        dallas_temp_str = format_temp(weather_metrics.get('dallas_temp_c'))
-        san_antonio_temp_str = format_temp(weather_metrics.get('san_antonio_temp_c'))
-        fort_worth_temp_str = format_temp(weather_metrics.get('fort_worth_temp_c'))
-        corpus_christi_temp_str = format_temp(weather_metrics.get('corpus_christi_temp_c'))
-
-        weather_part = (
-            f"On {date_from}, the average temperature across Texas was {avg_temp_str}. "
-            f"Average temperatures across major Texas cities on the ERCOT grid were as follows — "
-            f"Houston: {houston_temp_str}, Austin: {austin_temp_str}, "
-            f"Dallas: {dallas_temp_str}, San Antonio: {san_antonio_temp_str}, "
-            f"Fort Worth: {fort_worth_temp_str}, Corpus Christi: {corpus_christi_temp_str}."
-        )
-    else:
-        logger.warning(f"Missing weather data for {date_from} to {date_to}. Sentence will not include weather data.")
-
-    if not ercot_part and not weather_part:
-        logger.error(f"Both ERCOT and weather parts are empty for {date_from} to {date_to} despite earlier checks. Cannot create sentence.")
-        return None
-        
-    sentence_parts = [f"Between {date_from} and {date_to},"]
-    if ercot_part:
-        sentence_parts.append(ercot_part)
-    if weather_part:
-        sentence_parts.append(weather_part)
+    # Extract metric dictionaries
+    gen_metrics = ercot_metrics.get('generation_summary', {}).get('metrics', {}) if ercot_metrics else {}
+    load_metrics = ercot_metrics.get('load_summary', {}).get('metrics', {}) if ercot_metrics else {}
+    output_metrics = ercot_metrics.get('output_schedule', {}).get('metrics', {}) if ercot_metrics else {}
+    dsr_metrics = ercot_metrics.get('dsr_loads', {}).get('metrics', {}) if ercot_metrics else {}
+    ancillary_metrics = ercot_metrics.get('ancillary_ecrss', {}).get('metrics', {}) if ercot_metrics else {}
     
-    return " ".join(sentence_parts)
+    # Helper function to format metrics with N/A for missing data
+    def format_metric(value, unit="MW", precision=0):
+        if value is None:
+            return "N/A"
+        if precision == 0:
+            return f"{value:.0f} {unit}"
+        else:
+            return f"{value:.{precision}f} {unit}"
+    
+    # Calculate renewable averages if data is available
+    wind_sum = gen_metrics.get('sumBasePointWGR')
+    solar_sum = gen_metrics.get('sumBasePointPVGR') 
+    remres_sum = gen_metrics.get('sumBasePointREMRES')
+    gen_total = load_metrics.get('sumTelemGenMW')
+    
+    wind_avg = wind_sum / 96 if wind_sum is not None else None
+    solar_avg = solar_sum / 96 if solar_sum is not None else None
+    remres_avg = remres_sum / 96 if remres_sum is not None else None
+    
+    # Calculate renewable totals and percentage only if all renewable data is available
+    if wind_avg is not None and solar_avg is not None and remres_avg is not None:
+        renew_avg = wind_avg + solar_avg + remres_avg
+        renew_pct = (renew_avg / gen_total) * 100 if gen_total and gen_total > 0 else None
+    else:
+        renew_avg = None
+        renew_pct = None
+    
+    # Handle weather temperature with NaN check
+    tx_temp = None
+    if weather_metrics:
+        temp_value = weather_metrics.get('avg_temp_c')
+        if temp_value is not None and isinstance(temp_value, (int, float)) and not (isinstance(temp_value, float) and np.isnan(temp_value)):
+            tx_temp = temp_value
+    
+    if not ercot_metrics:
+        logger.warning(f"Missing ERCOT data for {date_from} to {date_to}. Using N/A for missing metrics.")
+    if not weather_metrics:
+        logger.warning(f"Missing weather data for {date_from} to {date_to}. Using N/A for temperature.")
+
+    # Build structured output matching the specified format
+    output_lines = [
+        "ISO: ERCOT",
+        f"Date_from: {date_from}",
+        f"Date_to:   {date_to}",
+        f"Avg system load: {format_metric(load_metrics.get('aggLoadSummary'))}",
+        f"Telemetry generation: {format_metric(gen_total)}",
+    ]
+    
+    # Renewables line - format based on data availability
+    if renew_avg is not None:
+        renew_pct_str = f"{renew_pct:.0f}%" if renew_pct is not None else "N/A"
+        output_lines.append(f"Renewables: {format_metric(renew_avg)} (wind {format_metric(wind_avg)} | solar {format_metric(solar_avg)} | other {format_metric(remres_avg)}) ({renew_pct_str})")
+    else:
+        output_lines.append("Renewables: N/A")
+    
+    # Continue with other metrics
+    output_lines.extend([
+        f"ECRSS max offer: {format_metric(ancillary_metrics.get('MWOffered'))}",
+        f"DSR load: {format_metric(dsr_metrics.get('sumTelemDSRLoad'))}",
+        f"SCED dispatchable: {format_metric(output_metrics.get('sumOutputSched'))} (headroom LSL {format_metric(output_metrics.get('sumLSLOutputSched'))} | HSL {format_metric(output_metrics.get('sumHSLOutputSched'))})",
+        f"Base-point non-intermittent: {format_metric(gen_metrics.get('sumBasePointNonIRR'))} (SH {format_metric(gen_metrics.get('sumHASLNonIRR'))} | SL {format_metric(gen_metrics.get('sumLASLNonIRR'))})",
+        f"Avg Texas temp: {format_metric(tx_temp, '°C', 1) if tx_temp is not None else 'N/A'}"
+    ])
+    
+    return "\n".join(output_lines)
 
 async def process_and_embed_daily_summary(
     date_to_start_process: str, 
