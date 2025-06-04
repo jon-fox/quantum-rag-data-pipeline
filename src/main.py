@@ -231,6 +231,30 @@ async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date
             except Exception as e:
                 logger.warning(f"Failed to fetch {service} data: {e}")
         
+        # DAM Settlement Point Prices - HubAvg
+        try:
+            dam_data = ercot_queries.get_dam_settlement_point_prices(
+                settlement_point="HB_HUBAVG",
+                delivery_date_from_override=date_from,
+                delivery_date_to_override=date_to
+            )
+            
+            # Extract settlement point prices and compute average
+            dam_values = extract_field_values(dam_data, [
+                ('settlementPointPrice', 'average')
+            ])
+            
+            avg_price = round(dam_values.get('settlementPointPrice', 0), 2) if dam_values.get('settlementPointPrice') else None
+            all_data['dam_hubavg_price'] = {'avg_price': avg_price}
+            
+            if enable_logging:
+                logger.info(f"DAM HubAvg Price data structure: {json.dumps(dam_data, indent=2, default=str)[:500]}...")
+                logger.info(f"DAM HubAvg Price: average price {avg_price}")
+                
+        except Exception as e:
+            logger.warning(f"Failed to fetch DAM HubAvg price data: {e}")
+            all_data['dam_hubavg_price'] = {'avg_price': None}
+        
         if enable_logging:
             logger.info(f"Complete ERCOT data summary:")
             for key, value in all_data.items():

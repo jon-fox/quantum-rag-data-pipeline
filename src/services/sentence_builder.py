@@ -77,6 +77,11 @@ def create_semantic_sentence(
         f"Telemetry generation: {format_metric(gen_total)}",
     ]
     
+    # Add DAM HubAvg price
+    price = ercot_metrics.get('dam_hubavg_price', {}).get('avg_price') if ercot_metrics else None
+    price_str = f"{price:.2f} $/MWh" if price is not None else "N/A"
+    output_lines.append(f"DAM HubAvg price: {price_str}")
+    
     # Renewables line - format based on data availability
     if renew_avg is not None:
         renew_pct_str = f"{renew_pct:.0f}%" if renew_pct is not None else "N/A"
