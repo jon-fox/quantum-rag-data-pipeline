@@ -24,15 +24,15 @@ class ERCOTClient:
         """Initialize the ERCOT API client."""
         self.auth_manager = get_auth_manager()
     
-    def get_data(self, endpoint, params=None, max_retries=3, base_delay=1.0):
+    def get_data(self, endpoint, params=None, max_retries=8, base_delay=5.0):
         """
         Make an authenticated request to the ERCOT API with retry logic for rate limits.
         
         Args:
             endpoint (str): API endpoint (without base URL)
             params (dict, optional): Query parameters for the request
-            max_retries (int): Maximum number of retry attempts for 429 errors
-            base_delay (float): Base delay in seconds for exponential backoff
+            max_retries (int): Maximum number of retry attempts for 429 errors (default: 8)
+            base_delay (float): Base delay in seconds for exponential backoff (default: 5.0)
             
         Returns:
             dict: Response data from the API
@@ -61,8 +61,9 @@ class ERCOTClient:
                 if response.status_code == 429:
                     if attempt < max_retries:
                         # Calculate delay with exponential backoff and jitter
-                        delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
-                        logger.warning(f"Rate limit hit (429) on attempt {attempt + 1}. Retrying in {delay:.2f} seconds...")
+                        # Use longer delays for 429 errors: 5, 10, 20, 40, 80, 160, 320, 640 seconds (+ jitter)
+                        delay = base_delay * (2 ** attempt) + random.uniform(0, 2)
+                        logger.warning(f"Rate limit hit (429) on attempt {attempt + 1}/{max_retries + 1}. Retrying in {delay:.2f} seconds...")
                         time.sleep(delay)
                         continue
                     else:
@@ -77,8 +78,8 @@ class ERCOTClient:
             except requests.RequestException as e:
                 if attempt < max_retries and "429" in str(e):
                     # Additional retry for 429 errors caught as exceptions
-                    delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
-                    logger.warning(f"Rate limit exception on attempt {attempt + 1}. Retrying in {delay:.2f} seconds...")
+                    delay = base_delay * (2 ** attempt) + random.uniform(0, 2)
+                    logger.warning(f"Rate limit exception on attempt {attempt + 1}/{max_retries + 1}. Retrying in {delay:.2f} seconds...")
                     time.sleep(delay)
                     continue
                 
