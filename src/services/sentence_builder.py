@@ -4,7 +4,6 @@ import numpy as np
 
 # Corrected relative imports
 from src.data.ercot_api.queries import ERCOTQueries
-from src.data.weather_api.weather import WeatherAPIClient
 from src.storage.pgvector_storage import PgVectorStorage
 from src.services.embedding_service import EmbeddingService
 
@@ -104,11 +103,10 @@ async def process_and_embed_daily_summary(
     date_to_start_process: str, 
     date_to_end_process: str, 
     ercot_queries: ERCOTQueries, 
-    weather_client: Optional[WeatherAPIClient], 
     pg_storage: PgVectorStorage, 
     embedding_service: Optional[EmbeddingService],
     fetch_ercot_metric_func: Callable[[ERCOTQueries, str, str], Awaitable[Optional[Dict[str, Any]]]],
-    fetch_weather_metrics_func: Callable[[WeatherAPIClient, str], Awaitable[Optional[Dict[str, float]]]]
+    fetch_weather_metrics_func: Callable[[str], Awaitable[Optional[Dict[str, float]]]]
 ):
     """Orchestrates fetching, processing, sentence creation, embedding, and storage for a single day."""
     logger.info(f"Processing daily summary for embedding on {date_to_start_process} to {date_to_end_process} (via sentence_builder)...")
@@ -116,17 +114,17 @@ async def process_and_embed_daily_summary(
     ercot_metrics = await fetch_ercot_metric_func(ercot_queries, date_to_start_process, date_to_end_process)
     
     weather_metrics = None
-    if weather_client:
-        weather_metrics = await fetch_weather_metrics_func(weather_client, date_to_start_process)
-    else:
-        logger.info(f"Weather client not available, skipping weather metrics for {date_to_start_process} to {date_to_end_process}.")
+    try:
+        weather_metrics = await fetch_weather_metrics_func(date_to_start_process)
+    except Exception as e:
+        logger.warning(f"Could not retrieve Weather metrics for {date_to_start_process} to {date_to_end_process}: {e}")
 
     if ercot_metrics is None:
         logger.warning(f"Could not retrieve ERCOT metrics for {date_to_start_process} to {date_to_end_process}. Skipping embedding.")
         return
     
-    if weather_client and weather_metrics is None:
-        logger.warning(f"Could not retrieve Weather metrics for {date_to_start_process} to {date_to_end_process} (weather client was available).")
+    if weather_metrics is None:
+        logger.warning(f"Could not retrieve Weather metrics for {date_to_start_process} to {date_to_end_process}.")
 
     semantic_sentence = create_semantic_sentence(date_to_start_process, date_to_end_process, ercot_metrics, weather_metrics)
 

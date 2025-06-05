@@ -9,12 +9,11 @@ from typing import Optional, Dict, Any
 from src.config.env_manager import load_environment, get_env_var
 from src.data.ercot_api.client import ERCOTClient
 from src.data.ercot_api.queries import ERCOTQueries
-from src.data.weather_api.weather import WeatherAPIClient
+from src.data.weather_api.meteostat_weather import get_ercot_avg_temperature
 from src.storage.pgvector_storage import PgVectorStorage
 from src.services.embedding_service import EmbeddingService
 
-from src.services.sentence_builder import process_and_embed_daily_summary 
-from src.config.constants import LOCATIONS
+from src.services.sentence_builder import process_and_embed_daily_summary
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -22,65 +21,26 @@ logger = logging.getLogger(__name__)
 
 ENABLE_ERCOT_LOGGING = False
 
-async def fetch_daily_weather_metrics(weather_client: WeatherAPIClient, date_to_fetch: str) -> Optional[Dict[str, float]]:
-    """Fetches and processes weather data to get key daily temperature metrics."""
+async def fetch_daily_weather_metrics(date_to_fetch: str) -> Optional[Dict[str, float]]:
+    """Fetches and processes weather data to get key daily temperature metrics using meteostat."""
     logger.info(f"Fetching weather metrics for {date_to_fetch}...")
     try:
-        weather_df = weather_client.get_historical_weather(date_str=date_to_fetch, locations=LOCATIONS)
-        if weather_df.empty:
+        avg_temp = get_ercot_avg_temperature(date_to_fetch)
+        if avg_temp is None:
             logger.info(f"No weather data found for {date_to_fetch}.")
             return None
 
-        # Assuming the first row of the DataFrame is the daily summary.
-        first_row = weather_df.iloc[0]
         metrics = {
-            "avg_temp_c": float(first_row.get('avg_temperature_c', np.nan)),
-            "houston_temp_c": float(first_row.get('houston_temp_c', np.nan)),
-            "austin_temp_c": float(first_row.get('austin_temp_c', np.nan)),
-            "dallas_temp_c": float(first_row.get('dallas_temp_c', np.nan)),
-            "san_antonio_temp_c": float(first_row.get('san_antonio_temp_c', np.nan)),
-            "fort_worth_temp_c": float(first_row.get('fort_worth_temp_c', np.nan)),
-            "corpus_christi_temp_c": float(first_row.get('corpus_christi_temp_c', np.nan)),
+            "avg_temp_c": avg_temp,
         }
-        # Filter out NaN values if any field failed to convert or was missing
-        metrics = {k: v for k, v in metrics.items() if not np.isnan(v)}
-        if not metrics: # If all metrics ended up as NaN
-             logger.warning(f"All weather metrics were NaN for {date_to_fetch}.")
-             return None
-
+        
         logger.info(f"Processed weather metrics for {date_to_fetch}: {metrics}")
         return metrics
     except Exception as e:
         logger.error(f"Error fetching/processing weather daily metrics for {date_to_fetch}: {e}", exc_info=True)
         return None
 
-async def fetch_and_store_weather_data(weather_client: WeatherAPIClient, pg_storage: PgVectorStorage, date_to_fetch: str):
-    """Fetches historical weather data and stores the raw DataFrame."""
-    logger.info(f"Fetching and storing raw weather data for {date_to_fetch}...")
-    try:
-        weather_df = weather_client.get_historical_weather(date_str=date_to_fetch, locations=LOCATIONS)
-        
-        if weather_df.empty:
-            logger.info(f"No weather data fetched for {date_to_fetch}.")
-            return
-            
-        logger.info(f"Fetched {len(weather_df)} weather records for {date_to_fetch}.")
-        
-        if 'time' in weather_df.columns:
-             weather_df.rename(columns={'time': 'timestamp'}, inplace=True)
-        
-        # Ensure only relevant columns are selected for insertion
-        table_columns = ['timestamp', 'houston_temp_c', 'austin_temp_c', 'dallas_temp_c', 'san_antonio_temp_c', 'fort_worth_temp_c', 'corpus_christi_temp_c', 'avg_temperature_c', 'avg_temperature_f']
-        df_to_insert = weather_df[[col for col in table_columns if col in weather_df.columns]]
 
-        if not df_to_insert.empty:
-            pg_storage.insert_dataframe_to_table(df_to_insert, 'historical_weather_data')
-            logger.info(f"Stored {len(df_to_insert)} weather records for {date_to_fetch} in 'historical_weather_data'.")
-        else:
-            logger.info(f"No relevant columns for weather data insertion for {date_to_fetch}.")
-            
-    except Exception as e:
-        logger.error(f"Error during weather data processing for {date_to_fetch}: {e}", exc_info=True)
 
 async def fetch_all_ercot_data(ercot_queries: ERCOTQueries, date_from: str, date_to: str, enable_logging: bool = False) -> Dict[str, Any]:
     """Fetches data from all ERCOT endpoints and extracts relevant metrics."""
@@ -296,18 +256,11 @@ async def main_ingestion_pipeline(date_from: Optional[str] = None, date_to: Opti
     
     load_environment()
 
-    days_to_process_for_embeddings = int(get_env_var("DAYS_TO_PROCESS_FOR_EMBEDDINGS", "1"))
-    days_to_store_raw_weather = int(get_env_var("DAYS_TO_STORE_RAW_WEATHER", "1")) 
-
     ercot_client = ERCOTClient()
     ercot_queries = ERCOTQueries(client=ercot_client, delivery_date_from=date_from, delivery_date_to=date_to)
     
-    weather_client = None
-    weather_api_key = get_env_var("WEATHER_API_KEY")
-    if weather_api_key:
-        weather_client = WeatherAPIClient(api_key=weather_api_key)
-    else:
-        logger.warning("WEATHER_API_KEY not found. Weather data tasks will be skipped.")
+    # Weather is now handled by meteostat, no API key needed
+    logger.info("Using meteostat for weather data (no API key required)")
 
     pg_vector_storage = PgVectorStorage(app_environment=get_env_var("APP_ENVIRONMENT", "prod"))
     
@@ -325,42 +278,34 @@ async def main_ingestion_pipeline(date_from: Optional[str] = None, date_to: Opti
     logger.info("--- Starting Data Ingestion Tasks ---")
 
     # Process and Embed Combined Daily Summaries
-    logger.info(f"--- Starting Combined Daily Summary Embedding for the last {days_to_process_for_embeddings} day(s) ---")
+    logger.info(f"--- Starting Combined Daily Summary Embedding for date range: {date_from} to {date_to} ---")
     embedding_tasks = []
-    for i in range(1, days_to_process_for_embeddings + 1):
-        target_date = today - timedelta(days=i)
-        previous_day = target_date - timedelta(days=1)
+    
+    # Parse the date range from the passed parameters
+    start_date_obj = datetime.strptime(date_from, '%Y-%m-%d')
+    end_date_obj = datetime.strptime(date_to, '%Y-%m-%d')
+    
+    # Process each day in the specified range
+    current_date = start_date_obj
+    while current_date <= end_date_obj:
+        previous_day = current_date - timedelta(days=1)
         embedding_tasks.append(
             process_and_embed_daily_summary( 
                 date_to_start_process=previous_day.strftime('%Y-%m-%d'),
-                date_to_end_process=target_date.strftime('%Y-%m-%d'), 
+                date_to_end_process=current_date.strftime('%Y-%m-%d'), 
                 ercot_queries=ercot_queries,
-                weather_client=weather_client,
                 pg_storage=pg_vector_storage,
                 embedding_service=embedding_service,
                 fetch_ercot_metric_func=fetch_ercot_metrics_for_embedding, # Pass the wrapper function
                 fetch_weather_metrics_func=fetch_daily_weather_metrics # Pass local function
             )
         )
+        current_date += timedelta(days=1)
+    
     if embedding_tasks:
         await asyncio.gather(*embedding_tasks)
-    logger.info(f"Combined daily summary embedding tasks completed for the last {days_to_process_for_embeddings} day(s).")
+    logger.info(f"Combined daily summary embedding tasks completed for date range: {date_from} to {date_to}.")
 
-    # Store Raw Weather Data
-    if weather_client:
-        logger.info(f"--- Starting Raw Weather DataFrame Storage for the last {days_to_store_raw_weather} day(s) ---")
-        weather_storage_tasks = []
-        for i in range(1, days_to_store_raw_weather + 1):
-            date_for_weather_storage = (today - timedelta(days=i)).strftime('%Y-%m-%d')
-            weather_storage_tasks.append(
-                fetch_and_store_weather_data(weather_client, pg_vector_storage, date_for_weather_storage)
-            )
-        if weather_storage_tasks:
-            await asyncio.gather(*weather_storage_tasks)
-        logger.info(f"Raw weather DataFrame storage tasks completed for the last {days_to_store_raw_weather} day(s).")
-    else:
-        logger.info("Skipping raw weather DataFrame storage as weather client is not initialized.")
-    
     # Graceful shutdown
     if hasattr(ercot_client, 'auth_manager') and hasattr(ercot_client.auth_manager, 'shutdown'):
         ercot_client.auth_manager.shutdown()
@@ -376,14 +321,53 @@ if __name__ == "__main__":
     if ENABLE_ERCOT_LOGGING:
         logger.info("ERCOT data structure logging is ENABLED")
     
-    # Default dates: yesterday to today
-    today = datetime.today()
-    default_date_from = (today - timedelta(days=1)).strftime('%Y-%m-%d')
-    default_date_to = today.strftime('%Y-%m-%d')
+    # Configuration for date range processing
+    # Set your desired date range here (YYYY-MM-DD format)
+    START_DATE = "2025-05-01"  # Modify this to your desired start date
+    END_DATE = "2025-06-01"    # Modify this to your desired end date
     
-    logger.info("Starting main.py script...")
+    # Parse start and end dates
+    start_date = datetime.strptime(START_DATE, '%Y-%m-%d')
+    end_date = datetime.strptime(END_DATE, '%Y-%m-%d')
+    
+    # Validate date range
+    if start_date >= end_date:
+        logger.error("Start date must be before end date")
+        exit(1)
+    
+    logger.info(f"Starting main.py script with date range: {START_DATE} to {END_DATE}")
+    logger.info("Processing in 2-day increments with 1-day overlap")
+    
+    # Process date range in 2-day increments with 1-day overlap
+    current_start = start_date
+    increment_count = 1
+    
     try:
-        asyncio.run(main_ingestion_pipeline(default_date_from, default_date_to))
+        while current_start < end_date:
+            # Calculate end date for current increment (2 days from start, but not beyond final end date)
+            current_end = min(current_start + timedelta(days=1), end_date)
+            
+            # Format dates for processing
+            date_from = current_start.strftime('%Y-%m-%d')
+            date_to = current_end.strftime('%Y-%m-%d')
+            
+            logger.info(f"--- Processing Increment {increment_count}: {date_from} to {date_to} ---")
+            
+            # Run the main ingestion pipeline for this increment
+            asyncio.run(main_ingestion_pipeline(date_from, date_to))
+            
+            logger.info(f"--- Completed Increment {increment_count}: {date_from} to {date_to} ---")
+            
+            # Move to next increment (1-day overlap: last day becomes first day of next increment)
+            current_start = current_end
+            increment_count += 1
+            
+            # Break if we've reached the end date
+            if current_end >= end_date:
+                break
+                
+        logger.info(f"Completed processing all increments. Total increments processed: {increment_count - 1}")
+        
     except KeyboardInterrupt:
         logger.info("Pipeline execution interrupted by user.")
     except Exception as e:
