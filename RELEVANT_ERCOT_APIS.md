@@ -54,12 +54,19 @@ This data is then used to:
 
 ---
 
-**Sample Summary (Statewide ERCOT, May 30–31, 2025):**
-**Total Load & Generation:** On May 30, ERCOT reported an aggregated system load of **5341 MW** and telemetry generation of **5387 MW**.
-**Ancillary Services:** ECRSS offers totaled **2.1 GW**, with pricing data recorded.
-**Demand Side Resources:** DSR loads contributed **104 MW**. DSR generation values were also reported.
-**Forecast Accuracy:** Output schedules were reported at **5400 MW**, with lower and upper bounds at **5300 MW** and **5500 MW** respectively. Basepoint generation was **5380 MW**, with high and low sustainable limits at **5450 MW** and **5300 MW**.
-**Weather Conditions:** Average temperatures across major Texas cities on May 30 were as follows — **Houston: 25.6°C**, **Austin: 27.1°C**, **San Antonio: 26.8°C**, **Dallas: 23.3°C**, **El Paso: 24.1°C**.
+**Sample Summary (Statewide ERCOT):**
+ISO: ERCOT
+Date_from: 2025-05-08
+Date_to:   2025-05-09
+Avg system load: 51405 MW
+Telemetry generation: 51438 MW
+DAM HubAvg price: 32.53 $/MWh
+Renewables: 16993 MW (wind 5490 MW | solar 7655 MW | other 3847 MW) (33%)
+ECRSS max offer: 4404 MW
+DSR load: 219 MW
+SCED dispatchable: 4270 MW (headroom LSL 2997 MW | HSL 16380 MW)
+Base-point non-intermittent: 34502 MW (SH 41011 MW | SL 19636 MW)
+Avg Texas temp: 21.9 °C
 
 
 <!-- 
@@ -77,5 +84,3 @@ May include later
 * Weather coverage is concise, highlighting only relevant temperature ranges across key regions.
 * Summary avoids excessive detail and noise while retaining key metrics useful for forecasting.
 * Easily extendable to include historical comparisons or trends.
-
-Let me know if you want this formatted for Markdown or added to your project readme.
