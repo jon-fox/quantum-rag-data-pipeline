@@ -323,9 +323,11 @@ if __name__ == "__main__":
     
     # Configuration for date range processing
     # Set your desired date range here (YYYY-MM-DD format)
-    START_DATE = "2025-05-01"  # Modify this to your desired start date
-    END_DATE = "2025-06-01"    # Modify this to your desired end date
+    START_DATE = "2024-10-01"  # Modify this to your desired start date
+    END_DATE = "2025-01-01"    # Modify this to your desired end date
     
+    # Loaded 2025-01-01 to 2025-06-01 so far
+
     # Parse start and end dates
     start_date = datetime.strptime(START_DATE, '%Y-%m-%d')
     end_date = datetime.strptime(END_DATE, '%Y-%m-%d')
